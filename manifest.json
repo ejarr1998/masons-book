@@ -1,0 +1,14 @@
+{
+  "name": "The Jarrett Book",
+  "short_name": "Jarrett Book",
+  "description": "A private place to keep our family's moments.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#F6F1E7",
+  "theme_color": "#2C3B2E",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

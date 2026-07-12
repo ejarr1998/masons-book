@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Mason's Book</title>
+<meta name="theme-color" content="#2C3B2E">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div>
+      <div class="wordmark">The <span>Jarrett</span> Book</div>
+      <div class="header-sub" id="headerSub">Family Feed</div>
+    </div>
+    <div class="mode-badge" id="modeBadge">View mode</div>
+  </div>
+
+  <!-- KID TABS -->
+  <div class="tabs" id="tabs"></div>
+
+  <!-- CATEGORY FILTER PILLS -->
+  <div class="pills" id="pills"></div>
+
+  <!-- FEED -->
+  <div class="feed" id="feed">
+    <div class="loading-msg">Loading moments…</div>
+  </div>
+
+  <!-- FAB (edit mode only) -->
+  <button class="fab" id="fab" style="display:none;">+</button>
+
+</div>
+
+<!-- ADD ENTRY SHEET -->
+<div class="sheet-overlay" id="addSheetOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div id="addSheetContent"></div>
+  </div>
+</div>
+
+<!-- PIN SCREEN (shown when tapping edit route without device auth) -->
+<div class="sheet-overlay" id="pinOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="pin-screen">
+      <div class="sheet-title">Enter PIN</div>
+      <div class="pin-dots" id="pinDots"></div>
+      <div class="pin-error" id="pinError"></div>
+      <div class="pin-keypad" id="pinKeypad"></div>
+      <button class="btn-secondary" id="pinCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- LIGHTBOX -->
+<div class="lightbox-overlay" id="lightbox">
+  <button class="lightbox-close" id="lightboxClose">×</button>
+  <button class="lightbox-nav prev" id="lightboxPrev">‹</button>
+  <img id="lightboxImg" src="" alt="">
+  <button class="lightbox-nav next" id="lightboxNext">›</button>
+  <div class="lightbox-caption" id="lightboxCaption"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
