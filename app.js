@@ -64,6 +64,12 @@ let activeCategoryFilter = "all";
 let selectedType = null;
 let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
+let customCategories = {}; // user-created entry types, shared via Firestore
+let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid, shared via Firestore
+
+function getAllCategories() {
+  return { ...CATEGORIES, ...customCategories };
+}
 
 // ============================================================
 // INIT
@@ -73,9 +79,21 @@ function init() {
   renderPills();
   checkEditRoute();
   listenToKids();
+  listenToCategoryConfig();
   listenToEntries();
   registerServiceWorker();
   bindGlobalEvents();
+}
+
+function listenToCategoryConfig() {
+  onSnapshot(doc(db, "settings", "categoryConfig"), (snap) => {
+    const data = snap.exists() ? snap.data() : {};
+    customCategories = {};
+    (data.custom || []).forEach(c => { customCategories[c.id] = { label: c.label, emoji: c.emoji, tagLabel: c.label }; });
+    hiddenCategoryIds = data.hidden || [];
+    renderPills();
+    renderFeed();
+  }, (err) => console.error("Category config listen error:", err));
 }
 
 async function listenToKids() {
@@ -168,7 +186,8 @@ function updateHeaderSub() {
 
 function renderPills() {
   const pillsEl = document.getElementById("pills");
-  const cats = [{ id: "all", label: "All" }, ...Object.entries(CATEGORIES).map(([id, c]) => ({ id, label: c.label }))];
+  const all = getAllCategories();
+  const cats = [{ id: "all", label: "All" }, ...Object.entries(all).map(([id, c]) => ({ id, label: c.label }))];
   pillsEl.innerHTML = cats.map(c =>
     `<div class="pill ${activeCategoryFilter === c.id ? 'active' : ''}" data-cat="${c.id}">${c.label}</div>`
   ).join("");
@@ -243,7 +262,7 @@ function renderFeed() {
 }
 
 function renderCard(e) {
-  const cat = CATEGORIES[e.category] || CATEGORIES.photo;
+  const cat = getAllCategories()[e.category] || CATEGORIES.photo;
   const kidsTxt = kidsLabel(e.kids);
   const editControls = isEditMode ? `
     <div class="card-edit-controls">
@@ -385,11 +404,12 @@ function closeLightbox() {
 async function downloadCurrentPhoto() {
   const btn = document.getElementById("lightboxDownload");
   const originalText = btn.textContent;
+  const url = lightboxPhotos[lightboxIdx].url;
   btn.textContent = "Saving...";
   btn.disabled = true;
   try {
-    const url = lightboxPhotos[lightboxIdx].url;
     const response = await fetch(url);
+    if (!response.ok) throw new Error("Fetch failed");
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -400,8 +420,10 @@ async function downloadCurrentPhoto() {
     document.body.removeChild(a);
     URL.revokeObjectURL(objectUrl);
   } catch (err) {
-    console.error("Download error:", err);
-    showToast("Couldn't save photo — try again");
+    console.warn("Direct download failed (likely CORS), falling back to opening the image:", err);
+    // Fallback: open the photo in a new tab so the person can press-and-hold to save it.
+    window.open(url, "_blank");
+    showToast("Opened photo — press & hold to save it");
   } finally {
     btn.textContent = originalText;
     btn.disabled = false;
@@ -485,11 +507,11 @@ function closeAddSheet() {
 const CATEGORY_ORDER_KEY = "masonsbook_category_order";
 
 function getCategoryOrder() {
-  const defaultOrder = Object.keys(CATEGORIES);
+  const defaultOrder = Object.keys(getAllCategories());
   const stored = localStorage.getItem(CATEGORY_ORDER_KEY);
   if (!stored) return defaultOrder;
   try {
-    const saved = JSON.parse(stored).filter(id => CATEGORIES[id]);
+    const saved = JSON.parse(stored).filter(id => getAllCategories()[id]);
     const missing = defaultOrder.filter(id => !saved.includes(id));
     return [...saved, ...missing];
   } catch {
@@ -503,13 +525,14 @@ function saveCategoryOrder(order) {
 
 function renderTypePicker() {
   const content = document.getElementById("addSheetContent");
-  const order = getCategoryOrder();
+  const all = getAllCategories();
+  const order = getCategoryOrder().filter(id => !hiddenCategoryIds.includes(id) && all[id]);
   content.innerHTML = `
     <div class="sheet-title">Add a moment</div>
     <div class="type-hint" id="typeHint">Tap to add · press and hold to rearrange</div>
     <div class="type-grid" id="typeGrid">
       ${order.map(id => {
-        const c = CATEGORIES[id];
+        const c = all[id];
         return `
         <div class="type-btn" data-type="${id}">
           <span class="emoji">${c.emoji}</span>
@@ -517,8 +540,10 @@ function renderTypePicker() {
         </div>`;
       }).join("")}
     </div>
+    <button class="collapse-toggle" id="manageTypesLink" style="margin-top:6px;">⚙ Manage entry types</button>
   `;
   bindTypeGridReorder();
+  document.getElementById("manageTypesLink").addEventListener("click", renderManageCategories);
 }
 
 function bindTypeGridReorder() {
@@ -533,6 +558,7 @@ function bindTypeGridReorder() {
     let moved = false;
 
     btn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
       startX = e.clientX; startY = e.clientY;
       moved = false;
       pressTimer = setTimeout(() => {
@@ -593,7 +619,7 @@ function lastUsedKids() {
 
 function renderEntryForm(existing) {
   const content = document.getElementById("addSheetContent");
-  const cat = CATEGORIES[selectedType];
+  const cat = getAllCategories()[selectedType];
   const defaultKids = existing ? (existing.kids || []) : lastUsedKids();
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -680,6 +706,10 @@ function renderEntryForm(existing) {
         <div class="field"><label>Caption</label><textarea id="fCaption">${existing ? existing.caption || "" : ""}</textarea></div>
         ${photoPickerHtml(existing)}`;
       break;
+    default: // custom user-created types
+      typeFields = `
+        ${photoPickerHtml(existing)}
+        <div class="field"><label>Caption</label><textarea id="fCaption" placeholder="What's happening here?">${existing ? existing.caption || "" : ""}</textarea></div>`;
   }
 
   content.innerHTML = `
@@ -798,6 +828,8 @@ async function saveEntry() {
         data.title = getVal("fTitle");
         data.caption = getVal("fCaption");
         break;
+      default: // custom user-created types
+        data.caption = getVal("fCaption");
     }
 
     // Upload any new photos
@@ -889,8 +921,89 @@ function showToast(msg) {
 // ============================================================
 
 // ============================================================
-// MANAGE KIDS SHEET
+// MANAGE ENTRY TYPES SHEET
 // ============================================================
+
+function renderManageCategories(showAddForm) {
+  const content = document.getElementById("addSheetContent");
+  const all = getAllCategories();
+  const order = getCategoryOrder().filter(id => all[id]);
+
+  content.innerHTML = `
+    <div class="sheet-title">⚙ Manage entry types</div>
+    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+      ${order.map(id => {
+        const c = all[id];
+        const hidden = hiddenCategoryIds.includes(id);
+        return `
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--white); border:1px solid var(--taupe); border-radius:12px; ${hidden ? 'opacity:0.5;' : ''}">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:18px;">${c.emoji}</span>
+            <span style="font-weight:700; font-size:14px;">${escapeHtml(c.label)}</span>
+          </div>
+          <button class="chip ${hidden ? '' : 'selected'}" data-toggle-cat="${id}" style="padding:6px 12px; font-size:11.5px;">${hidden ? 'Hidden' : 'Visible'}</button>
+        </div>`;
+      }).join("")}
+    </div>
+    ${showAddForm ? `
+      <div class="field"><label>Emoji</label><input type="text" id="fCatEmoji" placeholder="e.g. 🩺" maxlength="4"></div>
+      <div class="field"><label>Name</label><input type="text" id="fCatLabel" placeholder="e.g. Doctor Visit"></div>
+      <button class="btn-primary" id="saveCatBtn">Save entry type</button>
+      <button class="btn-secondary" id="cancelAddCatBtn">Cancel</button>
+    ` : `
+      <button class="btn-primary" id="showAddCatFormBtn">+ Create custom type</button>
+      <button class="btn-secondary" id="backToPickerBtn">Back</button>
+    `}
+  `;
+
+  content.querySelectorAll("[data-toggle-cat]").forEach(btn => {
+    btn.addEventListener("click", () => toggleCategoryHidden(btn.dataset.toggleCat));
+  });
+
+  if (showAddForm) {
+    document.getElementById("saveCatBtn").addEventListener("click", saveCustomCategory);
+    document.getElementById("cancelAddCatBtn").addEventListener("click", () => renderManageCategories(false));
+  } else {
+    document.getElementById("showAddCatFormBtn").addEventListener("click", () => renderManageCategories(true));
+    document.getElementById("backToPickerBtn").addEventListener("click", renderTypePicker);
+  }
+}
+
+async function toggleCategoryHidden(id) {
+  const newHidden = hiddenCategoryIds.includes(id)
+    ? hiddenCategoryIds.filter(x => x !== id)
+    : [...hiddenCategoryIds, id];
+  try {
+    await setDoc(doc(db, "settings", "categoryConfig"), { hidden: newHidden }, { merge: true });
+  } catch (err) {
+    console.error("Toggle category error:", err);
+    showToast("Couldn't update — try again");
+  }
+}
+
+async function saveCustomCategory() {
+  const emoji = getVal("fCatEmoji").trim() || "📌";
+  const label = getVal("fCatLabel").trim();
+  if (!label) { showToast("Give it a name first"); return; }
+
+  const btn = document.getElementById("saveCatBtn");
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+  try {
+    const id = "custom_" + label.toLowerCase().replace(/[^a-z0-9]+/g, "") + "_" + Date.now().toString(36);
+    const configRef = doc(db, "settings", "categoryConfig");
+    const existingCustom = Object.entries(customCategories).map(([cid, c]) => ({ id: cid, label: c.label, emoji: c.emoji }));
+    await setDoc(configRef, { custom: [...existingCustom, { id, label, emoji }] }, { merge: true });
+    showToast(`${label} added`);
+    renderManageCategories(false);
+  } catch (err) {
+    console.error("Save custom category error:", err);
+    showToast("Couldn't save — try again");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save entry type";
+  }
+}
 
 function openManageKidsSheet() {
   renderManageKids();
