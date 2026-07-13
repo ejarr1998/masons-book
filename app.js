@@ -8,7 +8,7 @@ import {
   onSnapshot, query, orderBy, serverTimestamp, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  getStorage, ref, uploadBytes, getDownloadURL
+  getStorage, ref, uploadBytes, getDownloadURL, deleteObject
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import {
   getAuth, signInAnonymously, onAuthStateChanged
@@ -71,6 +71,8 @@ let activeCategoryFilter = "all";
 let selectedType = null;
 let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
+let editingPhotos = []; // existing photos on the entry currently being added/edited (removable)
+let removedPhotoPaths = []; // storage paths to actually delete once the save succeeds
 let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid, shared via Firestore
 
 // ============================================================
@@ -506,6 +508,8 @@ function openAddSheet() {
   editingEntryId = null;
   selectedType = null;
   pendingPhotos = [];
+  editingPhotos = [];
+  removedPhotoPaths = [];
   renderTypePicker();
   document.getElementById("addSheetOverlay").classList.add("open");
 }
@@ -516,6 +520,8 @@ function openEditSheet(entryId) {
   editingEntryId = entryId;
   selectedType = entry.category;
   pendingPhotos = [];
+  editingPhotos = entry.photos ? entry.photos.map(p => ({ ...p })) : [];
+  removedPhotoPaths = [];
   renderEntryForm(entry);
   document.getElementById("addSheetOverlay").classList.add("open");
 }
@@ -729,9 +735,11 @@ function renderEntryForm(existing) {
   // Photo input handling
   const photoInput = document.getElementById("fPhotos");
   if (photoInput) {
+    renderPhotoPreview();
     photoInput.addEventListener("change", (e) => {
-      pendingPhotos = Array.from(e.target.files);
+      pendingPhotos = pendingPhotos.concat(Array.from(e.target.files));
       renderPhotoPreview();
+      e.target.value = ""; // allow re-selecting the same file again later
     });
   }
 
@@ -778,13 +786,15 @@ function renderPregnancyFields(subtype, existing) {
     container.innerHTML = `
       <div class="field"><label>Title</label><input type="text" id="fTitle" placeholder="e.g. Anatomy scan day" value="${escapeHtml(title)}"></div>
       <div class="field"><label>Caption</label><textarea id="fCaption">${escapeHtml(caption)}</textarea></div>
-      ${photoPickerHtml(sameSubtypeAsExisting ? existing : null)}
+      ${photoPickerHtml()}
     `;
     const photoInput = document.getElementById("fPhotos");
     if (photoInput) {
+      renderPhotoPreview();
       photoInput.addEventListener("change", (e) => {
-        pendingPhotos = Array.from(e.target.files);
+        pendingPhotos = pendingPhotos.concat(Array.from(e.target.files));
         renderPhotoPreview();
+        e.target.value = "";
       });
     }
   }
@@ -878,14 +888,12 @@ function collectQuoteLines() {
   return lines;
 }
 
-function photoPickerHtml(existing) {
+function photoPickerHtml() {
   return `
     <div class="field">
       <label>Photos (optional)</label>
       <input type="file" id="fPhotos" accept="image/*" multiple>
-      <div class="photo-input-preview" id="photoPreview">
-        ${existing && existing.photos ? existing.photos.map(p => `<img src="${p.url}">`).join("") : ""}
-      </div>
+      <div class="photo-input-preview" id="photoPreview"></div>
     </div>`;
 }
 
@@ -893,9 +901,37 @@ function renderPhotoPreview() {
   const preview = document.getElementById("photoPreview");
   if (!preview) return;
   preview.innerHTML = "";
-  pendingPhotos.forEach(file => {
+
+  editingPhotos.forEach((p, i) => {
+    preview.innerHTML += `
+      <div class="photo-thumb">
+        <img src="${p.url}">
+        <button type="button" class="photo-thumb-remove" data-remove-existing="${i}" title="Remove photo">×</button>
+      </div>`;
+  });
+  pendingPhotos.forEach((file, i) => {
     const url = URL.createObjectURL(file);
-    preview.innerHTML += `<img src="${url}">`;
+    preview.innerHTML += `
+      <div class="photo-thumb">
+        <img src="${url}">
+        <button type="button" class="photo-thumb-remove" data-remove-pending="${i}" title="Remove photo">×</button>
+      </div>`;
+  });
+
+  preview.querySelectorAll("[data-remove-existing]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.removeExisting, 10);
+      const removed = editingPhotos[idx];
+      if (removed && removed.path) removedPhotoPaths.push(removed.path);
+      editingPhotos.splice(idx, 1);
+      renderPhotoPreview();
+    });
+  });
+  preview.querySelectorAll("[data-remove-pending]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      pendingPhotos.splice(parseInt(btn.dataset.removePending, 10), 1);
+      renderPhotoPreview();
+    });
   });
 }
 
@@ -971,11 +1007,11 @@ async function saveEntry() {
         data.caption = getVal("fCaption");
     }
 
-    // Upload any new photos
-    if (pendingPhotos.length > 0) {
-      const uploaded = await uploadPhotos(pendingPhotos);
-      const existing = editingEntryId ? (entries.find(e => e.id === editingEntryId)?.photos || []) : [];
-      data.photos = [...existing, ...uploaded];
+    // Photos: combine whatever's left in editingPhotos (after any removals)
+    // with newly uploaded ones. Only applies to forms that had a photo picker.
+    if (document.getElementById("fPhotos")) {
+      const uploaded = pendingPhotos.length > 0 ? await uploadPhotos(pendingPhotos) : [];
+      data.photos = [...editingPhotos, ...uploaded];
     }
 
     if (editingEntryId) {
@@ -986,6 +1022,17 @@ async function saveEntry() {
       await addDoc(collection(db, "entries"), data);
       showToast("Added to the book");
     }
+
+    // Best-effort cleanup: actually delete removed photos from Storage now
+    // that the save succeeded. Failures here are non-critical (orphaned
+    // file, no broken references) so they're logged, not surfaced.
+    if (removedPhotoPaths.length > 0) {
+      await Promise.all(removedPhotoPaths.map(path =>
+        deleteObject(ref(storage, path)).catch(err => console.warn("Storage cleanup skipped for", path, err))
+      ));
+      removedPhotoPaths = [];
+    }
+
     closeAddSheet();
   } catch (err) {
     console.error("Save error:", err);
@@ -1009,7 +1056,7 @@ async function uploadPhotos(files) {
     const storageRef = ref(storage, filename);
     await uploadBytes(storageRef, compressed);
     const url = await getDownloadURL(storageRef);
-    results.push({ url });
+    results.push({ url, path: filename });
   }
   return results;
 }
