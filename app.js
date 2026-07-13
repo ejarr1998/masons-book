@@ -1069,9 +1069,9 @@ function renderManageCategories() {
 
   content.innerHTML = `
     <div class="sheet-title">⚙ Manage entry types</div>
-    <div class="type-hint">Drag the ⠿ handle to reorder · tap Visible/Hidden to toggle</div>
+    <div class="type-hint">Use ↑ ↓ to reorder · tap Visible/Hidden to toggle</div>
     <div id="catList" style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
-      ${order.map(id => renderCatRow(id)).join("")}
+      ${order.map((id, i) => renderCatRow(id, i, order.length)).join("")}
     </div>
     <button class="btn-secondary" id="backToPickerBtn">Back</button>
   `;
@@ -1080,12 +1080,15 @@ function renderManageCategories() {
   document.getElementById("backToPickerBtn").addEventListener("click", renderTypePicker);
 }
 
-function renderCatRow(id) {
+function renderCatRow(id, index, total) {
   const c = CATEGORIES[id];
   const hidden = hiddenCategoryIds.includes(id);
   return `
     <div class="cat-row" data-cat-row="${id}" style="${hidden ? 'opacity:0.5;' : ''}">
-      <span class="cat-drag-handle" data-drag="${id}">⠿</span>
+      <div class="cat-move-btns">
+        <button class="cat-move-btn" data-move="up" data-id="${id}" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button class="cat-move-btn" data-move="down" data-id="${id}" ${index === total - 1 ? 'disabled' : ''}>↓</button>
+      </div>
       <span style="font-size:18px;">${c.emoji}</span>
       <span style="font-weight:700; font-size:14px; flex:1;">${escapeHtml(c.label)}</span>
       <button class="chip ${hidden ? '' : 'selected'}" data-toggle-cat="${id}" style="padding:6px 12px; font-size:11.5px;">${hidden ? 'Hidden' : 'Visible'}</button>
@@ -1095,84 +1098,23 @@ function renderCatRow(id) {
 function bindCatRowEvents() {
   const list = document.getElementById("catList");
 
-  // Instant-feedback hide/show toggle
   list.querySelectorAll("[data-toggle-cat]").forEach(btn => {
     btn.addEventListener("click", () => toggleCategoryHidden(btn.dataset.toggleCat));
   });
 
-  // Placeholder-based drag: the row detaches and floats fixed on the
-  // viewport, following the pointer. A lightweight placeholder (which never
-  // touches pointer capture) marks its landing spot in the list and gets
-  // reordered live. The real row is only reinserted once, on release. This
-  // avoids repeatedly moving the pointer-capturing element itself mid-drag,
-  // which was causing drags to randomly get stuck without saving.
-  list.querySelectorAll(".cat-drag-handle").forEach(handle => {
-    const row = handle.closest(".cat-row");
-
-    handle.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      handle.setPointerCapture(e.pointerId);
-
-      const startY = e.clientY;
-      const rect = row.getBoundingClientRect();
-
-      const placeholder = document.createElement("div");
-      placeholder.className = "cat-row-placeholder";
-      placeholder.style.height = rect.height + "px";
-      row.parentNode.insertBefore(placeholder, row);
-
-      row.classList.add("dragging");
-      row.style.position = "fixed";
-      row.style.top = rect.top + "px";
-      row.style.left = rect.left + "px";
-      row.style.width = rect.width + "px";
-      row.style.zIndex = "1000";
-      row.style.pointerEvents = "none";
-      document.body.appendChild(row);
-
-      const onMove = (moveEvent) => {
-        const dy = moveEvent.clientY - startY;
-        const newTop = rect.top + dy;
-        row.style.top = newTop + "px";
-        const rowMidY = newTop + rect.height / 2;
-
-        const siblings = Array.from(list.children).filter(el => el !== placeholder);
-        let target = null;
-        for (const sib of siblings) {
-          const sibRect = sib.getBoundingClientRect();
-          if (rowMidY < sibRect.top + sibRect.height / 2) { target = sib; break; }
-        }
-        if (target) {
-          list.insertBefore(placeholder, target);
-        } else {
-          list.appendChild(placeholder);
-        }
-      };
-
-      const onUp = () => {
-        list.insertBefore(row, placeholder);
-        placeholder.remove();
-        row.classList.remove("dragging");
-        row.style.position = "";
-        row.style.top = "";
-        row.style.left = "";
-        row.style.width = "";
-        row.style.zIndex = "";
-        row.style.pointerEvents = "";
-
-        const newOrder = Array.from(list.children).map(el => el.dataset.catRow);
-        saveCategoryOrder(newOrder);
-
-        handle.removeEventListener("pointermove", onMove);
-        handle.removeEventListener("pointerup", onUp);
-        handle.removeEventListener("pointercancel", onUp);
-      };
-
-      handle.addEventListener("pointermove", onMove);
-      handle.addEventListener("pointerup", onUp);
-      handle.addEventListener("pointercancel", onUp);
-    });
+  list.querySelectorAll("[data-move]").forEach(btn => {
+    btn.addEventListener("click", () => moveCategory(btn.dataset.id, btn.dataset.move));
   });
+}
+
+function moveCategory(id, direction) {
+  const order = getCategoryOrder().filter(cid => CATEGORIES[cid]);
+  const idx = order.indexOf(id);
+  const swapWith = direction === "up" ? idx - 1 : idx + 1;
+  if (swapWith < 0 || swapWith >= order.length) return;
+  [order[idx], order[swapWith]] = [order[swapWith], order[idx]];
+  saveCategoryOrder(order);
+  renderManageCategories(); // re-render for instant, guaranteed-consistent feedback
 }
 
 async function toggleCategoryHidden(id) {
