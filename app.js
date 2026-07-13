@@ -293,9 +293,22 @@ function renderCard(e) {
               ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
       break;
     case "funnything":
-      body = `<span class="quote-mark">"</span>
-              <div class="card-title">${escapeHtml(e.quote || "")}</div>
-              ${e.context ? `<p class="card-context">${escapeHtml(e.context)}</p>` : ""}`;
+      if (e.lines && e.lines.length) {
+        body = `<span class="quote-mark">"</span>
+                <div class="quote-dialogue">
+                  ${e.lines.map(l => `
+                    <div class="quote-line">
+                      <span class="quote-speaker">${escapeHtml(l.speaker || "")}:</span>
+                      <span class="quote-line-text">“${escapeHtml(l.text || "")}”</span>
+                    </div>`).join("")}
+                </div>
+                ${e.context ? `<p class="card-context">${escapeHtml(e.context)}</p>` : ""}`;
+      } else {
+        // Fallback for entries created before the dialogue format existed.
+        body = `<span class="quote-mark">"</span>
+                <div class="card-title">${escapeHtml(e.quote || "")}</div>
+                ${e.context ? `<p class="card-context">${escapeHtml(e.context)}</p>` : ""}`;
+      }
       break;
     case "stat":
       body = `<div class="card-title">Growth check-in</div>
@@ -589,7 +602,16 @@ function renderEntryForm(existing) {
       break;
     case "funnything":
       typeFields = `
-        <div class="field"><label>What did they say?</label><textarea id="fQuote" placeholder="The exact words..." autofocus>${existing ? existing.quote || "" : ""}</textarea></div>
+        <div class="field">
+          <label>Who's talking</label>
+          <div class="chip-select" id="speakerChips">
+            ${KIDS.map(k => `<div class="chip" data-speaker-chip="${escapeHtml(k.name)}">${escapeHtml(k.name)}</div>`).join("")}
+            <div class="chip" data-speaker-chip="Mom">Mom</div>
+            <div class="chip" data-speaker-chip="Dad">Dad</div>
+          </div>
+        </div>
+        <div id="quoteLines" class="quote-lines-editor"></div>
+        <button type="button" class="collapse-toggle" id="addSpeakerLineBtn">+ Add new speaker</button>
         <button type="button" class="collapse-toggle" id="toggleContext">+ Add context</button>
         <div class="field" id="contextField" style="display:${existing && existing.context ? 'block' : 'none'};">
           <label>Context (optional)</label>
@@ -665,6 +687,11 @@ function renderEntryForm(existing) {
     });
   });
 
+  // Quote dialogue editor (Funny Thing)
+  if (selectedType === "funnything") {
+    initQuoteLinesEditor(existing);
+  }
+
   // Context toggle for funny thing
   const toggleBtn = document.getElementById("toggleContext");
   if (toggleBtn) {
@@ -685,6 +712,71 @@ function renderEntryForm(existing) {
 
   document.getElementById("cancelEntryBtn").addEventListener("click", closeAddSheet);
   document.getElementById("saveEntryBtn").addEventListener("click", saveEntry);
+}
+
+let lastFocusedSpeakerRow = null;
+
+function initQuoteLinesEditor(existing) {
+  const container = document.getElementById("quoteLines");
+  lastFocusedSpeakerRow = null;
+
+  // Seed initial rows: existing dialogue, existing old-format single quote, or one blank row.
+  if (existing && existing.lines && existing.lines.length) {
+    existing.lines.forEach(l => addQuoteLineRow(l.speaker, l.text));
+  } else if (existing && existing.quote) {
+    addQuoteLineRow("", existing.quote);
+  } else {
+    addQuoteLineRow(KIDS[0] ? KIDS[0].name : "", "");
+  }
+
+  document.getElementById("addSpeakerLineBtn").addEventListener("click", () => {
+    addQuoteLineRow("", "");
+    const rows = container.querySelectorAll(".quote-line-row");
+    rows[rows.length - 1].querySelector(".fSpeaker").focus();
+  });
+
+  document.getElementById("speakerChips").querySelectorAll("[data-speaker-chip]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const target = lastFocusedSpeakerRow || container.querySelector(".quote-line-row:last-child");
+      if (target) {
+        target.querySelector(".fSpeaker").value = chip.dataset.speakerChip;
+      }
+    });
+  });
+}
+
+function addQuoteLineRow(speaker, text) {
+  const container = document.getElementById("quoteLines");
+  const row = document.createElement("div");
+  row.className = "quote-line-row";
+  row.innerHTML = `
+    <input type="text" class="fSpeaker" placeholder="Speaker" value="${escapeHtml(speaker || "")}">
+    <textarea class="fLineText" placeholder="What did they say?">${escapeHtml(text || "")}</textarea>
+    <button type="button" class="quote-line-remove" title="Remove">×</button>
+  `;
+  container.appendChild(row);
+
+  row.querySelector(".fSpeaker").addEventListener("focus", () => { lastFocusedSpeakerRow = row; });
+  row.querySelector(".quote-line-remove").addEventListener("click", () => {
+    // Always keep at least one row so the form never disappears entirely.
+    if (container.querySelectorAll(".quote-line-row").length > 1) {
+      row.remove();
+    } else {
+      row.querySelector(".fSpeaker").value = "";
+      row.querySelector(".fLineText").value = "";
+    }
+  });
+}
+
+function collectQuoteLines() {
+  const rows = document.querySelectorAll("#quoteLines .quote-line-row");
+  const lines = [];
+  rows.forEach(row => {
+    const speaker = row.querySelector(".fSpeaker").value.trim();
+    const text = row.querySelector(".fLineText").value.trim();
+    if (text) lines.push({ speaker, text });
+  });
+  return lines;
 }
 
 function photoPickerHtml(existing) {
@@ -711,6 +803,11 @@ function renderPhotoPreview() {
 // ---- Save (create or update) ----
 
 async function saveEntry() {
+  if (selectedType === "funnything" && collectQuoteLines().length === 0) {
+    showToast("Add at least one line first");
+    return;
+  }
+
   const btn = document.getElementById("saveEntryBtn");
   btn.disabled = true;
   btn.textContent = "Saving...";
@@ -733,7 +830,7 @@ async function saveEntry() {
       case "photo":
         data.caption = getVal("fCaption"); break;
       case "funnything":
-        data.quote = getVal("fQuote");
+        data.lines = collectQuoteLines();
         data.context = getVal("fContext");
         break;
       case "milestone":
@@ -893,34 +990,77 @@ function bindCatRowEvents() {
     btn.addEventListener("click", () => toggleCategoryHidden(btn.dataset.toggleCat));
   });
 
-  // Plain drag (no long-press delay) via the handle only
+  // Free-drag: the row floats and follows the pointer continuously; other
+  // rows shift out of the way live as you pass over them.
   list.querySelectorAll(".cat-drag-handle").forEach(handle => {
     const row = handle.closest(".cat-row");
     handle.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       handle.setPointerCapture(e.pointerId);
+
+      const gap = parseFloat(getComputedStyle(list).rowGap) || 8;
+      let startY = e.clientY;
+      let translateY = 0;
+
       row.classList.add("dragging");
+      row.style.position = "relative";
+      row.style.zIndex = "10";
+      row.style.pointerEvents = "none";
+      row.style.transition = "none";
+
+      const applyTransform = () => { row.style.transform = `translateY(${translateY}px)`; };
 
       const onMove = (moveEvent) => {
-        const target = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
-        const targetRow = target ? target.closest(".cat-row") : null;
-        if (targetRow && targetRow !== row && targetRow.parentElement === list) {
-          const all = Array.from(list.children);
-          if (all.indexOf(targetRow) < all.indexOf(row)) {
-            list.insertBefore(row, targetRow);
-          } else {
-            list.insertBefore(row, targetRow.nextSibling);
+        translateY = moveEvent.clientY - startY;
+        applyTransform();
+
+        // Check neighbors repeatedly (not just once) so a fast/long drag
+        // can pass over several rows in a single continuous motion.
+        let swapped = true;
+        while (swapped) {
+          swapped = false;
+          const siblings = Array.from(list.children);
+          const idx = siblings.indexOf(row);
+          const prev = siblings[idx - 1];
+          const next = siblings[idx + 1];
+          if (prev) {
+            const prevRect = prev.getBoundingClientRect();
+            if (moveEvent.clientY < prevRect.top + prevRect.height / 2) {
+              list.insertBefore(row, prev);
+              startY -= (prevRect.height + gap);
+              translateY = moveEvent.clientY - startY;
+              applyTransform();
+              swapped = true;
+              continue;
+            }
+          }
+          if (next) {
+            const nextRect = next.getBoundingClientRect();
+            if (moveEvent.clientY > nextRect.top + nextRect.height / 2) {
+              list.insertBefore(row, next.nextSibling);
+              startY += (nextRect.height + gap);
+              translateY = moveEvent.clientY - startY;
+              applyTransform();
+              swapped = true;
+            }
           }
         }
       };
+
       const onUp = () => {
         row.classList.remove("dragging");
+        row.style.transform = "";
+        row.style.position = "";
+        row.style.zIndex = "";
+        row.style.pointerEvents = "";
+        row.style.transition = "";
         const newOrder = Array.from(list.children).map(el => el.dataset.catRow);
         saveCategoryOrder(newOrder);
         handle.removeEventListener("pointermove", onMove);
         handle.removeEventListener("pointerup", onUp);
         handle.removeEventListener("pointercancel", onUp);
       };
+
       handle.addEventListener("pointermove", onMove);
       handle.addEventListener("pointerup", onUp);
       handle.addEventListener("pointercancel", onUp);
