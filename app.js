@@ -41,6 +41,7 @@ const DEVICE_AUTH_KEY = "masonsbook_device_authed";
 
 // ---- Category definitions ----
 const CATEGORIES = {
+  birth:      { label: "Birth Day",    emoji: "👶", tagLabel: "Birth Day" },
   photo:      { label: "Photo",        emoji: "📷", tagLabel: "Photo" },
   funnything: { label: "Funny Thing",  emoji: "😂", tagLabel: "Said" },
   milestone:  { label: "Milestone",    emoji: "⭐", tagLabel: "Milestone" },
@@ -184,10 +185,18 @@ function renderPills() {
 // FEED RENDERING
 // ============================================================
 
+// Parses a "YYYY-MM-DD" string as a LOCAL date, not UTC — avoids the classic
+// off-by-one bug where new Date("2026-11-24") shifts back a day in US timezones.
+function parseLocalDate(dateStr) {
+  if (!dateStr) return new Date(NaN);
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
 function calcAge(birthdateStr, atDateStr) {
   if (!birthdateStr) return "";
-  const birth = new Date(birthdateStr);
-  const at = new Date(atDateStr);
+  const birth = parseLocalDate(birthdateStr);
+  const at = parseLocalDate(atDateStr);
   if (isNaN(birth) || isNaN(at)) return "";
   let months = (at.getFullYear() - birth.getFullYear()) * 12 + (at.getMonth() - birth.getMonth());
   if (at.getDate() < birth.getDate()) months--;
@@ -203,7 +212,7 @@ function calcAge(birthdateStr, atDateStr) {
 }
 
 function formatDate(dateStr) {
-  const d = new Date(dateStr);
+  const d = parseLocalDate(dateStr);
   if (isNaN(d)) return dateStr;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
@@ -257,6 +266,15 @@ function renderCard(e) {
 
   let body = "";
   switch (e.category) {
+    case "birth":
+      body = `<div class="card-title">Welcome, ${escapeHtml(e.babyName || kidsTxt || "")}</div>
+              ${e.caption ? `<p class="card-text">${escapeHtml(e.caption)}</p>` : ""}
+              <div class="stat-grid">
+                ${e.weight ? `<div class="stat"><span class="stat-num">${escapeHtml(e.weight)}</span><span class="stat-label">Weight</span></div>` : ""}
+                ${e.length ? `<div class="stat"><span class="stat-num">${escapeHtml(e.length)}</span><span class="stat-label">Length</span></div>` : ""}
+                ${e.time ? `<div class="stat"><span class="stat-num">${escapeHtml(e.time)}</span><span class="stat-label">Time</span></div>` : ""}
+              </div>`;
+      break;
     case "milestone":
       body = `<div class="card-title">${escapeHtml(e.title || "")}</div>
               ${e.note ? `<p class="card-text">${escapeHtml(e.note)}</p>` : ""}
@@ -360,6 +378,32 @@ function updateLightbox() {
 }
 function closeLightbox() {
   document.getElementById("lightbox").classList.remove("open");
+}
+
+async function downloadCurrentPhoto() {
+  const btn = document.getElementById("lightboxDownload");
+  const originalText = btn.textContent;
+  btn.textContent = "Saving...";
+  btn.disabled = true;
+  try {
+    const url = lightboxPhotos[lightboxIdx].url;
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = `jarrett-book-${Date.now()}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(objectUrl);
+  } catch (err) {
+    console.error("Download error:", err);
+    showToast("Couldn't save photo — try again");
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
 }
 
 // ============================================================
@@ -466,7 +510,8 @@ function renderEntryForm(existing) {
   const content = document.getElementById("addSheetContent");
   const cat = CATEGORIES[selectedType];
   const defaultKids = existing ? (existing.kids || []) : lastUsedKids();
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
   const kidChips = `
     <div class="field">
@@ -484,6 +529,16 @@ function renderEntryForm(existing) {
 
   let typeFields = "";
   switch (selectedType) {
+    case "birth":
+      typeFields = `
+        <div class="field"><label>Time of birth</label><input type="text" id="fTime" placeholder="e.g. 3:41am" value="${existing ? existing.time || "" : ""}"></div>
+        <div class="field-row">
+          <div class="field"><label>Weight</label><input type="text" id="fWeight" placeholder="e.g. 7lb 6oz" value="${existing ? existing.weight || "" : ""}"></div>
+          <div class="field"><label>Length</label><input type="text" id="fLength" placeholder="e.g. 20in" value="${existing ? existing.length || "" : ""}"></div>
+        </div>
+        <div class="field"><label>Caption</label><textarea id="fCaption" placeholder="The moment we became...">${existing ? existing.caption || "" : ""}</textarea></div>
+        ${photoPickerHtml(existing)}`;
+      break;
     case "photo":
       typeFields = `
         ${photoPickerHtml(existing)}
@@ -621,6 +676,13 @@ async function saveEntry() {
     const data = { category: selectedType, kids: selectedKids, date, updatedAt: serverTimestamp() };
 
     switch (selectedType) {
+      case "birth":
+        data.time = getVal("fTime");
+        data.weight = getVal("fWeight");
+        data.length = getVal("fLength");
+        data.caption = getVal("fCaption");
+        data.babyName = selectedKids.length ? kidsLabel(selectedKids) : "";
+        break;
       case "photo":
         data.caption = getVal("fCaption"); break;
       case "funnything":
@@ -817,6 +879,7 @@ function bindGlobalEvents() {
     window.history.replaceState({}, "", window.location.pathname);
   });
   document.getElementById("lightboxClose").addEventListener("click", closeLightbox);
+  document.getElementById("lightboxDownload").addEventListener("click", downloadCurrentPhoto);
   document.getElementById("lightbox").addEventListener("click", (e) => {
     if (e.target.id === "lightbox") closeLightbox();
   });
