@@ -56,6 +56,13 @@ const MILESTONE_SUGGESTIONS = [
   "Crawled", "First steps", "First word", "Slept through the night", "First haircut"
 ];
 
+const PREGNANCY_SUBTYPES = {
+  update:  { label: "Update",  emoji: "📝" },
+  craving: { label: "Craving", emoji: "🍽️" },
+  symptom: { label: "Symptom", emoji: "💭" },
+  scan:    { label: "Scan",    emoji: "🩻" }
+};
+
 // ---- State ----
 let entries = [];
 let isEditMode = false;
@@ -329,8 +336,15 @@ function renderCard(e) {
               ${e.unlockDate ? `<span class="card-age">Unlocks ${formatDate(e.unlockDate)}</span>` : ""}`;
       break;
     case "pregnancy":
-      body = `<div class="card-title">${escapeHtml(e.title || "Pregnancy update")}</div>
-              ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
+      if (e.subtype === "craving" && e.cravings && e.cravings.length) {
+        body = `<div class="card-title">Rachel's Cravings</div>
+                <ul class="craving-bullets">
+                  ${e.cravings.map(c => `<li>${escapeHtml(c)}</li>`).join("")}
+                </ul>`;
+      } else {
+        body = `<div class="card-title">${escapeHtml(e.title || "Pregnancy update")}</div>
+                ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
+      }
       break;
     default: // photo
       body = `${e.caption ? `<p class="photo-caption">${escapeHtml(e.caption)}</p>` : ""}
@@ -342,7 +356,7 @@ function renderCard(e) {
       <div class="card-meta">
         <span class="card-date">${formatDate(e.date)}</span>
         <div style="display:flex; align-items:center; gap:8px;">
-          <span class="card-tag">${cat.tagLabel}</span>
+          <span class="card-tag">${(e.category === "pregnancy" && e.subtype && PREGNANCY_SUBTYPES[e.subtype]) ? PREGNANCY_SUBTYPES[e.subtype].label : cat.tagLabel}</span>
           ${editControls}
         </div>
       </div>
@@ -656,9 +670,15 @@ function renderEntryForm(existing) {
       break;
     case "pregnancy":
       typeFields = `
-        <div class="field"><label>Title</label><input type="text" id="fTitle" placeholder="e.g. Anatomy scan day" value="${existing ? escapeHtml(existing.title || "") : ""}"></div>
-        <div class="field"><label>Caption</label><textarea id="fCaption">${existing ? existing.caption || "" : ""}</textarea></div>
-        ${photoPickerHtml(existing)}`;
+        <div class="field">
+          <label>Type</label>
+          <div class="chip-select" id="pregnancySubtypeChips">
+            ${Object.entries(PREGNANCY_SUBTYPES).map(([id, s]) => `
+              <div class="chip ${(existing?.subtype || 'update') === id ? 'selected' : ''}" data-subtype="${id}">${s.emoji} ${s.label}</div>
+            `).join("")}
+          </div>
+        </div>
+        <div id="pregnancyFields"></div>`;
       break;
     default: // custom user-created types
       typeFields = `
@@ -692,6 +712,11 @@ function renderEntryForm(existing) {
     initQuoteLinesEditor(existing);
   }
 
+  // Pregnancy sub-type fields (Update / Craving / Symptom / Scan)
+  if (selectedType === "pregnancy") {
+    initPregnancySubtypeFields(existing);
+  }
+
   // Context toggle for funny thing
   const toggleBtn = document.getElementById("toggleContext");
   if (toggleBtn) {
@@ -712,6 +737,80 @@ function renderEntryForm(existing) {
 
   document.getElementById("cancelEntryBtn").addEventListener("click", closeAddSheet);
   document.getElementById("saveEntryBtn").addEventListener("click", saveEntry);
+}
+
+function initPregnancySubtypeFields(existing) {
+  const startSubtype = existing?.subtype || "update";
+  renderPregnancyFields(startSubtype, existing);
+
+  document.getElementById("pregnancySubtypeChips").querySelectorAll(".chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      document.querySelectorAll("#pregnancySubtypeChips .chip").forEach(c => c.classList.remove("selected"));
+      chip.classList.add("selected");
+      renderPregnancyFields(chip.dataset.subtype, existing);
+    });
+  });
+}
+
+function renderPregnancyFields(subtype, existing) {
+  const container = document.getElementById("pregnancyFields");
+  const sameSubtypeAsExisting = existing && (existing.subtype || "update") === subtype;
+
+  if (subtype === "craving") {
+    container.innerHTML = `
+      <div id="cravingList" class="quote-lines-editor"></div>
+      <button type="button" class="collapse-toggle" id="addCravingBtn">+ Add craving</button>
+    `;
+    const seed = (sameSubtypeAsExisting && existing.cravings) ? existing.cravings : [];
+    if (seed.length) {
+      seed.forEach(c => addCravingRow(c));
+    } else {
+      addCravingRow("");
+    }
+    document.getElementById("addCravingBtn").addEventListener("click", () => {
+      addCravingRow("");
+      const rows = document.querySelectorAll("#cravingList .craving-row");
+      rows[rows.length - 1].querySelector("input").focus();
+    });
+  } else {
+    const title = sameSubtypeAsExisting ? (existing.title || "") : "";
+    const caption = sameSubtypeAsExisting ? (existing.caption || "") : "";
+    container.innerHTML = `
+      <div class="field"><label>Title</label><input type="text" id="fTitle" placeholder="e.g. Anatomy scan day" value="${escapeHtml(title)}"></div>
+      <div class="field"><label>Caption</label><textarea id="fCaption">${escapeHtml(caption)}</textarea></div>
+      ${photoPickerHtml(sameSubtypeAsExisting ? existing : null)}
+    `;
+    const photoInput = document.getElementById("fPhotos");
+    if (photoInput) {
+      photoInput.addEventListener("change", (e) => {
+        pendingPhotos = Array.from(e.target.files);
+        renderPhotoPreview();
+      });
+    }
+  }
+}
+
+function addCravingRow(text) {
+  const container = document.getElementById("cravingList");
+  const row = document.createElement("div");
+  row.className = "craving-row";
+  row.innerHTML = `
+    <input type="text" class="fCraving" placeholder="e.g. Pickles and ice cream" value="${escapeHtml(text || "")}">
+    <button type="button" class="quote-line-remove" title="Remove">×</button>
+  `;
+  container.appendChild(row);
+  row.querySelector(".quote-line-remove").addEventListener("click", () => {
+    if (container.querySelectorAll(".craving-row").length > 1) {
+      row.remove();
+    } else {
+      row.querySelector("input").value = "";
+    }
+  });
+}
+
+function collectCravings() {
+  const rows = document.querySelectorAll("#cravingList .craving-row input");
+  return Array.from(rows).map(i => i.value.trim()).filter(Boolean);
 }
 
 let lastFocusedSpeakerRow = null;
@@ -807,6 +906,10 @@ async function saveEntry() {
     showToast("Add at least one line first");
     return;
   }
+  if (selectedType === "pregnancy" && document.querySelector("#pregnancySubtypeChips .chip.selected")?.dataset.subtype === "craving" && collectCravings().length === 0) {
+    showToast("Add at least one craving first");
+    return;
+  }
 
   const btn = document.getElementById("saveEntryBtn");
   btn.disabled = true;
@@ -853,10 +956,17 @@ async function saveEntry() {
         data.text = getVal("fText");
         data.unlockDate = getVal("fUnlockDate");
         break;
-      case "pregnancy":
-        data.title = getVal("fTitle");
-        data.caption = getVal("fCaption");
+      case "pregnancy": {
+        const subtype = document.querySelector("#pregnancySubtypeChips .chip.selected")?.dataset.subtype || "update";
+        data.subtype = subtype;
+        if (subtype === "craving") {
+          data.cravings = collectCravings();
+        } else {
+          data.title = getVal("fTitle");
+          data.caption = getVal("fCaption");
+        }
         break;
+      }
       default: // custom user-created types
         data.caption = getVal("fCaption");
     }
@@ -990,72 +1100,69 @@ function bindCatRowEvents() {
     btn.addEventListener("click", () => toggleCategoryHidden(btn.dataset.toggleCat));
   });
 
-  // Free-drag: the row floats and follows the pointer continuously; other
-  // rows shift out of the way live as you pass over them.
+  // Placeholder-based drag: the row detaches and floats fixed on the
+  // viewport, following the pointer. A lightweight placeholder (which never
+  // touches pointer capture) marks its landing spot in the list and gets
+  // reordered live. The real row is only reinserted once, on release. This
+  // avoids repeatedly moving the pointer-capturing element itself mid-drag,
+  // which was causing drags to randomly get stuck without saving.
   list.querySelectorAll(".cat-drag-handle").forEach(handle => {
     const row = handle.closest(".cat-row");
+
     handle.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       handle.setPointerCapture(e.pointerId);
 
-      const gap = parseFloat(getComputedStyle(list).rowGap) || 8;
-      let startY = e.clientY;
-      let translateY = 0;
+      const startY = e.clientY;
+      const rect = row.getBoundingClientRect();
+
+      const placeholder = document.createElement("div");
+      placeholder.className = "cat-row-placeholder";
+      placeholder.style.height = rect.height + "px";
+      row.parentNode.insertBefore(placeholder, row);
 
       row.classList.add("dragging");
-      row.style.position = "relative";
-      row.style.zIndex = "10";
+      row.style.position = "fixed";
+      row.style.top = rect.top + "px";
+      row.style.left = rect.left + "px";
+      row.style.width = rect.width + "px";
+      row.style.zIndex = "1000";
       row.style.pointerEvents = "none";
-      row.style.transition = "none";
-
-      const applyTransform = () => { row.style.transform = `translateY(${translateY}px)`; };
+      document.body.appendChild(row);
 
       const onMove = (moveEvent) => {
-        translateY = moveEvent.clientY - startY;
-        applyTransform();
+        const dy = moveEvent.clientY - startY;
+        const newTop = rect.top + dy;
+        row.style.top = newTop + "px";
+        const rowMidY = newTop + rect.height / 2;
 
-        // Check neighbors repeatedly (not just once) so a fast/long drag
-        // can pass over several rows in a single continuous motion.
-        let swapped = true;
-        while (swapped) {
-          swapped = false;
-          const siblings = Array.from(list.children);
-          const idx = siblings.indexOf(row);
-          const prev = siblings[idx - 1];
-          const next = siblings[idx + 1];
-          if (prev) {
-            const prevRect = prev.getBoundingClientRect();
-            if (moveEvent.clientY < prevRect.top + prevRect.height / 2) {
-              list.insertBefore(row, prev);
-              startY -= (prevRect.height + gap);
-              translateY = moveEvent.clientY - startY;
-              applyTransform();
-              swapped = true;
-              continue;
-            }
-          }
-          if (next) {
-            const nextRect = next.getBoundingClientRect();
-            if (moveEvent.clientY > nextRect.top + nextRect.height / 2) {
-              list.insertBefore(row, next.nextSibling);
-              startY += (nextRect.height + gap);
-              translateY = moveEvent.clientY - startY;
-              applyTransform();
-              swapped = true;
-            }
-          }
+        const siblings = Array.from(list.children).filter(el => el !== placeholder);
+        let target = null;
+        for (const sib of siblings) {
+          const sibRect = sib.getBoundingClientRect();
+          if (rowMidY < sibRect.top + sibRect.height / 2) { target = sib; break; }
+        }
+        if (target) {
+          list.insertBefore(placeholder, target);
+        } else {
+          list.appendChild(placeholder);
         }
       };
 
       const onUp = () => {
+        list.insertBefore(row, placeholder);
+        placeholder.remove();
         row.classList.remove("dragging");
-        row.style.transform = "";
         row.style.position = "";
+        row.style.top = "";
+        row.style.left = "";
+        row.style.width = "";
         row.style.zIndex = "";
         row.style.pointerEvents = "";
-        row.style.transition = "";
+
         const newOrder = Array.from(list.children).map(el => el.dataset.catRow);
         saveCategoryOrder(newOrder);
+
         handle.removeEventListener("pointermove", onMove);
         handle.removeEventListener("pointerup", onUp);
         handle.removeEventListener("pointercancel", onUp);
