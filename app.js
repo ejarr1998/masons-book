@@ -4,8 +4,8 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
-  onSnapshot, query, orderBy, serverTimestamp
+  getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
+  onSnapshot, query, orderBy, serverTimestamp, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   getStorage, ref, uploadBytes, getDownloadURL
@@ -29,15 +29,14 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const auth = getAuth(app);
 
-// ---- Config: kids (add new kids here as they arrive) ----
-const KIDS = [
-  { id: "mason", name: "Mason", birthdate: "2026-11-24" }
-];
+// ---- Kids list (stored in Firestore /kids collection, managed from the
+// "Manage kids" gear icon in edit mode — no code changes needed to add one) ----
+let KIDS = [];
 
 // ---- PIN config ----
 // Simple client-side gate (not a security boundary — see README).
 // Change this to whatever 4-6 digit PIN you and Rachel want.
-const EDIT_PIN = "1998"; // ⚠️ CHANGE THIS before sharing the edit link with anyone
+const EDIT_PIN = "123456"; // ⚠️ CHANGE THIS before sharing the edit link with anyone
 const DEVICE_AUTH_KEY = "masonsbook_device_authed";
 
 // ---- Category definitions ----
@@ -70,12 +69,30 @@ let editingEntryId = null; // if set, add sheet is in "edit existing" mode
 // ============================================================
 
 function init() {
-  renderTabs();
   renderPills();
   checkEditRoute();
+  listenToKids();
   listenToEntries();
   registerServiceWorker();
   bindGlobalEvents();
+}
+
+async function listenToKids() {
+  const kidsCol = collection(db, "kids");
+  // One-time seed: if no kids exist yet, create Mason so existing entries
+  // tagged "mason" keep working. Safe to run every load — it no-ops once seeded.
+  const snap = await getDocs(kidsCol);
+  if (snap.empty) {
+    await setDoc(doc(db, "kids", "mason"), {
+      name: "Mason", birthdate: "2026-11-24", order: 0
+    }).catch(err => console.warn("Seed skipped (likely no write access yet):", err));
+  }
+  const q = query(kidsCol, orderBy("order", "asc"));
+  onSnapshot(q, (snapshot) => {
+    KIDS = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderTabs();
+    renderFeed();
+  }, (err) => console.error("Kids listen error:", err));
 }
 
 function checkEditRoute() {
@@ -96,6 +113,7 @@ function enterEditMode() {
   document.getElementById("modeBadge").textContent = "Edit mode";
   document.getElementById("modeBadge").classList.add("edit");
   document.getElementById("fab").style.display = "flex";
+  document.getElementById("manageKidsBtn").style.display = "flex";
   signInAnonymously(auth).catch(err => console.error("Auth error:", err));
   renderFeed();
 }
@@ -723,8 +741,73 @@ function showToast(msg) {
 // GLOBAL EVENTS
 // ============================================================
 
+// ============================================================
+// MANAGE KIDS SHEET
+// ============================================================
+
+function openManageKidsSheet() {
+  renderManageKids();
+  document.getElementById("addSheetOverlay").classList.add("open");
+}
+
+function renderManageKids(showAddForm) {
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">👶 Manage kids</div>
+    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+      ${KIDS.map(k => `
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; background:var(--white); border:1px solid var(--taupe); border-radius:12px;">
+          <div>
+            <div style="font-weight:700; font-size:14px;">${escapeHtml(k.name)}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">${k.birthdate ? formatDate(k.birthdate) : "No birthdate set"}</div>
+          </div>
+        </div>`).join("")}
+    </div>
+    ${showAddForm ? `
+      <div class="field"><label>Name</label><input type="text" id="fKidName" placeholder="Child's name"></div>
+      <div class="field"><label>Birthdate</label><input type="date" id="fKidBirthdate"></div>
+      <button class="btn-primary" id="saveKidBtn">Save child</button>
+      <button class="btn-secondary" id="cancelAddKidBtn">Cancel</button>
+    ` : `
+      <button class="btn-primary" id="showAddKidFormBtn">+ Add a child</button>
+      <button class="btn-secondary" id="closeManageKidsBtn">Close</button>
+    `}
+  `;
+
+  if (showAddForm) {
+    document.getElementById("saveKidBtn").addEventListener("click", saveNewKid);
+    document.getElementById("cancelAddKidBtn").addEventListener("click", () => renderManageKids(false));
+  } else {
+    document.getElementById("showAddKidFormBtn").addEventListener("click", () => renderManageKids(true));
+    document.getElementById("closeManageKidsBtn").addEventListener("click", closeAddSheet);
+  }
+}
+
+async function saveNewKid() {
+  const name = getVal("fKidName").trim();
+  const birthdate = getVal("fKidBirthdate");
+  if (!name) { showToast("Enter a name first"); return; }
+
+  const btn = document.getElementById("saveKidBtn");
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+  try {
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "") || `kid${Date.now()}`;
+    await setDoc(doc(db, "kids", id), { name, birthdate, order: KIDS.length });
+    showToast(`${name} added`);
+    renderManageKids(false);
+  } catch (err) {
+    console.error("Add kid error:", err);
+    showToast("Couldn't save — try again");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save child";
+  }
+}
+
 function bindGlobalEvents() {
   document.getElementById("fab").addEventListener("click", openAddSheet);
+  document.getElementById("manageKidsBtn").addEventListener("click", openManageKidsSheet);
   document.getElementById("addSheetOverlay").addEventListener("click", (e) => {
     if (e.target.id === "addSheetOverlay") closeAddSheet();
   });
