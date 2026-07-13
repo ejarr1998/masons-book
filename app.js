@@ -70,6 +70,7 @@ let activeKidFilter = "all";
 let activeCategoryFilter = "all";
 let activeYearFilter = "all";
 let activeMonthFilter = "all";
+let expandedFilterSections = { people: false, type: false, dates: false };
 let selectedType = null;
 let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
@@ -82,7 +83,8 @@ let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid,
 // ============================================================
 
 function init() {
-  renderPills();
+  updateHeaderSub();
+  updateFiltersButtonBadge();
   checkEditRoute();
   listenToKids();
   listenToCategoryConfig();
@@ -95,7 +97,6 @@ function listenToCategoryConfig() {
   onSnapshot(doc(db, "settings", "categoryConfig"), (snap) => {
     const data = snap.exists() ? snap.data() : {};
     hiddenCategoryIds = data.hidden || [];
-    renderPills();
     renderFeed();
   }, (err) => console.error("Category config listen error:", err));
 }
@@ -113,7 +114,7 @@ async function listenToKids() {
   const q = query(kidsCol, orderBy("order", "asc"));
   onSnapshot(q, (snapshot) => {
     KIDS = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderTabs();
+    updateHeaderSub();
     renderFeed();
   }, (err) => console.error("Kids listen error:", err));
 }
@@ -149,7 +150,7 @@ function listenToEntries() {
   const q = query(collection(db, "entries"), orderBy("date", "desc"));
   onSnapshot(q, (snapshot) => {
     entries = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    updateDateFilterButton();
+    updateFiltersButtonBadge();
     renderFeed();
   }, (err) => {
     console.error("Firestore listen error:", err);
@@ -162,23 +163,6 @@ function listenToEntries() {
 // TABS + FILTER PILLS
 // ============================================================
 
-function renderTabs() {
-  const tabsEl = document.getElementById("tabs");
-  const tabs = [{ id: "all", name: "Family" }, ...KIDS];
-  tabsEl.innerHTML = tabs.map(t =>
-    `<div class="tab ${activeKidFilter === t.id ? 'active' : ''}" data-kid="${t.id}">${t.name}</div>`
-  ).join("");
-  tabsEl.querySelectorAll(".tab").forEach(el => {
-    el.addEventListener("click", () => {
-      activeKidFilter = el.dataset.kid;
-      renderTabs();
-      updateHeaderSub();
-      renderFeed();
-    });
-  });
-  updateHeaderSub();
-}
-
 function updateHeaderSub() {
   const sub = document.getElementById("headerSub");
   if (activeKidFilter === "all") {
@@ -189,34 +173,7 @@ function updateHeaderSub() {
   }
 }
 
-function renderPills() {
-  const pillsEl = document.getElementById("pills");
-  const all = CATEGORIES;
-  const cats = [{ id: "all", label: "All" }, ...Object.entries(all).map(([id, c]) => ({ id, label: c.label }))];
-  pillsEl.innerHTML = cats.map(c =>
-    `<div class="pill ${activeCategoryFilter === c.id ? 'active' : ''}" data-cat="${c.id}">${c.label}</div>`
-  ).join("");
-  pillsEl.querySelectorAll(".pill").forEach(el => {
-    el.addEventListener("click", () => {
-      activeCategoryFilter = el.dataset.cat;
-      renderPills();
-      renderFeed();
-    });
-  });
-}
-
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-function dateFilterLabel() {
-  if (activeYearFilter === "all") return "📅 All dates";
-  if (activeMonthFilter === "all") return `📅 ${activeYearFilter}`;
-  return `📅 ${MONTH_NAMES[activeMonthFilter]} ${activeYearFilter}`;
-}
-
-function updateDateFilterButton() {
-  const btn = document.getElementById("dateFilterBtn");
-  if (btn) btn.textContent = dateFilterLabel();
-}
 
 function getEntryYears() {
   return Array.from(new Set(
@@ -224,87 +181,160 @@ function getEntryYears() {
   )).sort((a, b) => b - a);
 }
 
-function openDateFilterSheet() {
-  renderDateFilterSheet();
+function updateFiltersButtonBadge() {
+  const btn = document.getElementById("filtersTriggerBtn");
+  if (!btn) return;
+  const activeCount = [activeKidFilter !== "all", activeCategoryFilter !== "all", activeYearFilter !== "all"].filter(Boolean).length;
+  btn.innerHTML = `Filters${activeCount > 0 ? ` <span class="filters-badge">${activeCount}</span>` : ""}`;
+}
+
+function openFiltersSheet() {
+  renderFiltersSheet();
   document.getElementById("addSheetOverlay").classList.add("open");
 }
 
-function renderDateFilterSheet() {
-  const content = document.getElementById("addSheetContent");
-  const years = getEntryYears();
-
-  if (years.length === 0) {
-    content.innerHTML = `
-      <div class="sheet-title">📅 Filter by date</div>
-      <div class="feed-empty" style="padding:20px 0;">No entries yet to filter by.</div>
-      <button class="btn-secondary" id="closeDateFilterBtn">Close</button>
-    `;
-    document.getElementById("closeDateFilterBtn").addEventListener("click", closeAddSheet);
-    return;
-  }
-
-  content.innerHTML = `
-    <div class="sheet-title">📅 Filter by date</div>
-    <div class="field">
-      <label>Year</label>
-      <div class="chip-select" id="yearChips">
-        <div class="chip ${activeYearFilter === "all" ? "selected" : ""}" data-year="all">All years</div>
-        ${years.map(y => `<div class="chip ${activeYearFilter === y ? "selected" : ""}" data-year="${y}">${y}</div>`).join("")}
-      </div>
-    </div>
-    <div class="field" id="monthField" style="display:${activeYearFilter === "all" ? "none" : "block"};">
-      <label>Month</label>
-      <div class="chip-select" id="monthChips"></div>
-    </div>
-    <button class="btn-primary" id="applyDateFilterBtn">Done</button>
-    <button class="btn-secondary" id="clearDateFilterBtn">Clear filter</button>
-  `;
-
-  renderMonthChipsForSheet();
-
-  content.querySelectorAll("#yearChips .chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      const val = chip.dataset.year;
-      activeYearFilter = val === "all" ? "all" : parseInt(val, 10);
-      activeMonthFilter = "all";
-      renderDateFilterSheet(); // re-render so month field appears/updates
-    });
-  });
-
-  document.getElementById("applyDateFilterBtn").addEventListener("click", () => {
-    updateDateFilterButton();
-    renderFeed();
-    closeAddSheet();
-  });
-  document.getElementById("clearDateFilterBtn").addEventListener("click", () => {
-    activeYearFilter = "all";
-    activeMonthFilter = "all";
-    updateDateFilterButton();
-    renderFeed();
-    closeAddSheet();
-  });
+function peopleSummary() {
+  if (activeKidFilter === "all") return "Family";
+  const k = KIDS.find(k => k.id === activeKidFilter);
+  return k ? k.name : "Family";
 }
 
-function renderMonthChipsForSheet() {
-  if (activeYearFilter === "all") return;
-  const monthChips = document.getElementById("monthChips");
-  const monthsWithEntries = Array.from(new Set(
-    entries
-      .map(e => parseLocalDate(e.date))
-      .filter(d => !isNaN(d) && d.getFullYear() === activeYearFilter)
-      .map(d => d.getMonth())
-  )).sort((a, b) => a - b);
+function typeSummary() {
+  if (activeCategoryFilter === "all") return "All";
+  return CATEGORIES[activeCategoryFilter]?.label || "All";
+}
 
-  monthChips.innerHTML = [`<div class="chip ${activeMonthFilter === "all" ? "selected" : ""}" data-month="all">All months</div>`]
-    .concat(monthsWithEntries.map(m => `<div class="chip ${activeMonthFilter === m ? "selected" : ""}" data-month="${m}">${MONTH_NAMES[m]}</div>`))
-    .join("");
+function datesSummary() {
+  if (activeYearFilter === "all") return "All dates";
+  if (activeMonthFilter === "all") return `${activeYearFilter}`;
+  return `${MONTH_NAMES[activeMonthFilter]} ${activeYearFilter}`;
+}
 
-  monthChips.querySelectorAll(".chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      const val = chip.dataset.month;
-      activeMonthFilter = val === "all" ? "all" : parseInt(val, 10);
-      renderMonthChipsForSheet();
+function filterSectionHtml(id, title, summary, bodyHtml) {
+  const expanded = !!expandedFilterSections[id];
+  return `
+    <div class="filter-section">
+      <button type="button" class="filter-section-header" data-toggle-section="${id}">
+        <span class="filter-section-title">${title}</span>
+        <span class="filter-section-right">
+          <span class="filter-section-summary">${summary}</span>
+          <span class="filter-chevron ${expanded ? 'open' : ''}">▾</span>
+        </span>
+      </button>
+      <div class="filter-section-body" id="section-${id}" style="display:${expanded ? 'block' : 'none'};">
+        ${bodyHtml}
+      </div>
+    </div>`;
+}
+
+function peopleSectionBodyHtml() {
+  const options = [{ id: "all", name: "Family" }, ...KIDS];
+  return `<div class="chip-select">${options.map(o =>
+    `<div class="chip ${activeKidFilter === o.id ? 'selected' : ''}" data-people-chip="${o.id}">${escapeHtml(o.name)}</div>`
+  ).join("")}</div>`;
+}
+
+function typeSectionBodyHtml() {
+  const options = [{ id: "all", label: "All" }, ...Object.entries(CATEGORIES).map(([id, c]) => ({ id, label: c.label }))];
+  return `<div class="chip-select">${options.map(o =>
+    `<div class="chip ${activeCategoryFilter === o.id ? 'selected' : ''}" data-type-chip="${o.id}">${escapeHtml(o.label)}</div>`
+  ).join("")}</div>`;
+}
+
+function datesSectionBodyHtml() {
+  const years = getEntryYears();
+  if (years.length === 0) {
+    return `<div style="font-size:13px; color:var(--ink-soft);">No entries yet.</div>`;
+  }
+  let html = `
+    <div class="filter-subtle-label">Year</div>
+    <div class="chip-select">
+      <div class="chip ${activeYearFilter === "all" ? "selected" : ""}" data-year-chip="all">All years</div>
+      ${years.map(y => `<div class="chip ${activeYearFilter === y ? "selected" : ""}" data-year-chip="${y}">${y}</div>`).join("")}
+    </div>`;
+  if (activeYearFilter !== "all") {
+    const monthsWithEntries = Array.from(new Set(
+      entries
+        .map(e => parseLocalDate(e.date))
+        .filter(d => !isNaN(d) && d.getFullYear() === activeYearFilter)
+        .map(d => d.getMonth())
+    )).sort((a, b) => a - b);
+    html += `
+      <div class="filter-subtle-label" style="margin-top:12px;">Month</div>
+      <div class="chip-select">
+        <div class="chip ${activeMonthFilter === "all" ? "selected" : ""}" data-month-chip="all">All months</div>
+        ${monthsWithEntries.map(m => `<div class="chip ${activeMonthFilter === m ? "selected" : ""}" data-month-chip="${m}">${MONTH_NAMES[m]}</div>`).join("")}
+      </div>`;
+  }
+  return html;
+}
+
+function renderFiltersSheet() {
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">Filters</div>
+    ${filterSectionHtml("people", "👪 People", peopleSummary(), peopleSectionBodyHtml())}
+    ${filterSectionHtml("type", "🏷️ Type of events", typeSummary(), typeSectionBodyHtml())}
+    ${filterSectionHtml("dates", "📅 Dates", datesSummary(), datesSectionBodyHtml())}
+    <button class="btn-primary" id="applyFiltersBtn" style="margin-top:10px;">Show results</button>
+    <button class="btn-secondary" id="clearAllFiltersBtn">Clear all filters</button>
+  `;
+  bindFilterSectionEvents();
+}
+
+function bindFilterSectionEvents() {
+  const content = document.getElementById("addSheetContent");
+
+  content.querySelectorAll("[data-toggle-section]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.toggleSection;
+      expandedFilterSections[id] = !expandedFilterSections[id];
+      renderFiltersSheet();
     });
+  });
+  content.querySelectorAll("[data-people-chip]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      activeKidFilter = chip.dataset.peopleChip;
+      renderFiltersSheet();
+    });
+  });
+  content.querySelectorAll("[data-type-chip]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      activeCategoryFilter = chip.dataset.typeChip;
+      renderFiltersSheet();
+    });
+  });
+  content.querySelectorAll("[data-year-chip]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const val = chip.dataset.yearChip;
+      activeYearFilter = val === "all" ? "all" : parseInt(val, 10);
+      activeMonthFilter = "all";
+      renderFiltersSheet();
+    });
+  });
+  content.querySelectorAll("[data-month-chip]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const val = chip.dataset.monthChip;
+      activeMonthFilter = val === "all" ? "all" : parseInt(val, 10);
+      renderFiltersSheet();
+    });
+  });
+
+  document.getElementById("applyFiltersBtn").addEventListener("click", () => {
+    updateHeaderSub();
+    updateFiltersButtonBadge();
+    renderFeed();
+    closeAddSheet();
+  });
+  document.getElementById("clearAllFiltersBtn").addEventListener("click", () => {
+    activeKidFilter = "all";
+    activeCategoryFilter = "all";
+    activeYearFilter = "all";
+    activeMonthFilter = "all";
+    updateHeaderSub();
+    updateFiltersButtonBadge();
+    renderFeed();
+    closeAddSheet();
   });
 }
 
@@ -1357,7 +1387,7 @@ async function saveNewKid() {
 function bindGlobalEvents() {
   document.getElementById("fab").addEventListener("click", openAddSheet);
   document.getElementById("manageKidsBtn").addEventListener("click", openManageKidsSheet);
-  document.getElementById("dateFilterBtn").addEventListener("click", openDateFilterSheet);
+  document.getElementById("filtersTriggerBtn").addEventListener("click", openFiltersSheet);
   document.getElementById("addSheetOverlay").addEventListener("click", (e) => {
     if (e.target.id === "addSheetOverlay") closeAddSheet();
   });
