@@ -41,14 +41,14 @@ const DEVICE_AUTH_KEY = "masonsbook_device_authed";
 
 // ---- Category definitions ----
 const CATEGORIES = {
-  birth:      { label: "Birth Day",    emoji: "👶", tagLabel: "Birth Day" },
   photo:      { label: "Photo",        emoji: "📷", tagLabel: "Photo" },
   funnything: { label: "Funny Thing",  emoji: "😂", tagLabel: "Said" },
   milestone:  { label: "Milestone",    emoji: "⭐", tagLabel: "Milestone" },
   stat:       { label: "Stat",         emoji: "📏", tagLabel: "Stat" },
   birthday:   { label: "Birthday",     emoji: "🎂", tagLabel: "Birthday" },
   letter:     { label: "Letter",       emoji: "✉️", tagLabel: "Letter" },
-  pregnancy:  { label: "Pregnancy",    emoji: "🤰", tagLabel: "Pregnancy" }
+  pregnancy:  { label: "Pregnancy",    emoji: "🤰", tagLabel: "Pregnancy" },
+  birth:      { label: "Birth Day",    emoji: "👶", tagLabel: "Birth Day" }
 };
 
 const MILESTONE_SUGGESTIONS = [
@@ -268,7 +268,7 @@ function renderCard(e) {
   switch (e.category) {
     case "birth":
       body = `<div class="card-title">Welcome, ${escapeHtml(e.babyName || kidsTxt || "")}</div>
-              ${e.caption ? `<p class="card-text">${escapeHtml(e.caption)}</p>` : ""}
+              ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}
               <div class="stat-grid">
                 ${e.weight ? `<div class="stat"><span class="stat-num">${escapeHtml(e.weight)}</span><span class="stat-label">Weight</span></div>` : ""}
                 ${e.length ? `<div class="stat"><span class="stat-num">${escapeHtml(e.length)}</span><span class="stat-label">Length</span></div>` : ""}
@@ -305,19 +305,21 @@ function renderCard(e) {
       break;
     case "pregnancy":
       body = `<div class="card-title">${escapeHtml(e.title || "Pregnancy update")}</div>
-              ${e.caption ? `<p class="card-text">${escapeHtml(e.caption)}</p>` : ""}`;
+              ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
       break;
     default: // photo
-      body = `${e.caption ? `<p class="card-text">${escapeHtml(e.caption)}</p>` : ""}
+      body = `${e.caption ? `<p class="photo-caption">${escapeHtml(e.caption)}</p>` : ""}
               ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
   }
 
   return `
     <div class="card ${e.category}" data-entry="${e.id}">
-      ${editControls}
       <div class="card-meta">
         <span class="card-date">${formatDate(e.date)}</span>
-        <span class="card-tag">${cat.tagLabel}</span>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="card-tag">${cat.tagLabel}</span>
+          ${editControls}
+        </div>
       </div>
       ${photosHtml}
       <div class="card-body">
@@ -480,23 +482,106 @@ function closeAddSheet() {
   document.getElementById("addSheetOverlay").classList.remove("open");
 }
 
+const CATEGORY_ORDER_KEY = "masonsbook_category_order";
+
+function getCategoryOrder() {
+  const defaultOrder = Object.keys(CATEGORIES);
+  const stored = localStorage.getItem(CATEGORY_ORDER_KEY);
+  if (!stored) return defaultOrder;
+  try {
+    const saved = JSON.parse(stored).filter(id => CATEGORIES[id]);
+    const missing = defaultOrder.filter(id => !saved.includes(id));
+    return [...saved, ...missing];
+  } catch {
+    return defaultOrder;
+  }
+}
+
+function saveCategoryOrder(order) {
+  localStorage.setItem(CATEGORY_ORDER_KEY, JSON.stringify(order));
+}
+
 function renderTypePicker() {
   const content = document.getElementById("addSheetContent");
+  const order = getCategoryOrder();
   content.innerHTML = `
     <div class="sheet-title">Add a moment</div>
-    <div class="type-grid">
-      ${Object.entries(CATEGORIES).map(([id, c]) => `
+    <div class="type-hint" id="typeHint">Tap to add · press and hold to rearrange</div>
+    <div class="type-grid" id="typeGrid">
+      ${order.map(id => {
+        const c = CATEGORIES[id];
+        return `
         <div class="type-btn" data-type="${id}">
           <span class="emoji">${c.emoji}</span>
           <span>${c.label}</span>
-        </div>`).join("")}
+        </div>`;
+      }).join("")}
     </div>
   `;
-  content.querySelectorAll(".type-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      selectedType = btn.dataset.type;
-      renderEntryForm();
+  bindTypeGridReorder();
+}
+
+function bindTypeGridReorder() {
+  const grid = document.getElementById("typeGrid");
+  const LONG_PRESS_MS = 450;
+  const MOVE_CANCEL_THRESHOLD = 10;
+
+  grid.querySelectorAll(".type-btn").forEach(btn => {
+    let pressTimer = null;
+    let startX = 0, startY = 0;
+    let dragging = false;
+    let moved = false;
+
+    btn.addEventListener("pointerdown", (e) => {
+      startX = e.clientX; startY = e.clientY;
+      moved = false;
+      pressTimer = setTimeout(() => {
+        dragging = true;
+        btn.setPointerCapture(e.pointerId);
+        btn.classList.add("dragging");
+        if (navigator.vibrate) navigator.vibrate(30);
+        document.getElementById("typeHint").textContent = "Drag to reorder, then let go";
+      }, LONG_PRESS_MS);
     });
+
+    btn.addEventListener("pointermove", (e) => {
+      const dx = Math.abs(e.clientX - startX);
+      const dy = Math.abs(e.clientY - startY);
+      if (!dragging && (dx > MOVE_CANCEL_THRESHOLD || dy > MOVE_CANCEL_THRESHOLD)) {
+        clearTimeout(pressTimer);
+        moved = true;
+      }
+      if (dragging) {
+        moved = true;
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        const targetBtn = target ? target.closest(".type-btn") : null;
+        if (targetBtn && targetBtn !== btn && targetBtn.parentElement === grid) {
+          const all = Array.from(grid.children);
+          if (all.indexOf(targetBtn) < all.indexOf(btn)) {
+            grid.insertBefore(btn, targetBtn);
+          } else {
+            grid.insertBefore(btn, targetBtn.nextSibling);
+          }
+        }
+      }
+    });
+
+    const endPress = () => {
+      clearTimeout(pressTimer);
+      if (dragging) {
+        dragging = false;
+        btn.classList.remove("dragging");
+        const newOrder = Array.from(grid.children).map(el => el.dataset.type);
+        saveCategoryOrder(newOrder);
+        document.getElementById("typeHint").textContent = "Tap to add · press and hold to rearrange";
+      } else if (!moved) {
+        selectedType = btn.dataset.type;
+        renderEntryForm();
+      }
+    };
+
+    btn.addEventListener("pointerup", endPress);
+    btn.addEventListener("pointercancel", () => { clearTimeout(pressTimer); dragging = false; btn.classList.remove("dragging"); });
   });
 }
 
