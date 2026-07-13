@@ -37,7 +37,7 @@ const KIDS = [
 // ---- PIN config ----
 // Simple client-side gate (not a security boundary — see README).
 // Change this to whatever 4-6 digit PIN you and Rachel want.
-const EDIT_PIN = "123456"; // ⚠️ CHANGE THIS before sharing the edit link with anyone
+const EDIT_PIN = "1998"; // ⚠️ CHANGE THIS before sharing the edit link with anyone
 const DEVICE_AUTH_KEY = "masonsbook_device_authed";
 
 // ---- Category definitions ----
