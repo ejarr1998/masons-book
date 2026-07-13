@@ -264,15 +264,13 @@ input, textarea, select{ font-family: inherit; }
   padding: 10px 12px; background: var(--white); border:1px solid var(--taupe); border-radius:12px;
   transition: opacity .15s ease, box-shadow .12s ease, transform .12s ease;
 }
-.cat-row.dragging{ box-shadow: 0 14px 28px -8px rgba(42,38,32,0.35); transform: scale(1.03); }
-.cat-row-placeholder{
-  border: 2px dashed var(--taupe); border-radius:12px; background: var(--parchment-2);
+.cat-move-btns{ display:flex; flex-direction:column; gap:2px; }
+.cat-move-btn{
+  width:26px; height:22px; border-radius:6px; border:1px solid var(--taupe);
+  background: var(--parchment-2); color: var(--ink-soft); font-size:12px; cursor:pointer; line-height:1;
 }
-.cat-drag-handle{
-  font-size:18px; color: var(--ink-soft); cursor:grab; padding: 4px 6px; touch-action:none;
-  -webkit-touch-callout:none; user-select:none; -webkit-user-select:none;
-}
-.cat-drag-handle:active{ cursor:grabbing; }
+.cat-move-btn:disabled{ opacity:0.3; cursor:default; }
+.cat-move-btn:not(:disabled):active{ background: var(--taupe); }
 .type-grid{ display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom: 6px; touch-action: none; }
 .type-btn{
   display:flex; flex-direction:column; align-items:center; gap:6px;
@@ -282,9 +280,7 @@ input, textarea, select{ font-family: inherit; }
 }
 .type-btn .emoji{ font-size:22px; }
 .type-btn:active{ background: var(--parchment-2); }
-.type-btn.dragging{
-  transform: scale(1.08); box-shadow: 0 10px 24px -6px rgba(42,38,32,0.3); z-index:5; background: var(--parchment-2);
-}
+
 
 .field{ margin-bottom: 14px; }
 .field label{ display:block; font-size:12px; font-weight:700; color: var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; }
