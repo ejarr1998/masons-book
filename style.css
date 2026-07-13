@@ -330,6 +330,20 @@ input, textarea, select{ font-family: inherit; }
 .milestone-suggest{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
 .milestone-suggest .chip{ font-size:12.5px; padding:7px 12px; }
 
+#newTagInput{
+  padding: 9px 12px; border-radius:10px; border:1px solid var(--taupe); font-size:13px; background: var(--white);
+}
+
+.entry-tags{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.entry-tag-pill{
+  font-size:11.5px; font-weight:600; color: var(--ink-soft); background: var(--parchment-2);
+  padding: 3px 9px; border-radius:100px;
+}
+.card.milestone .entry-tag-pill, .card.birthday .entry-tag-pill, .card.pregnancy .entry-tag-pill,
+.card.birth .entry-tag-pill, .card.funnything .entry-tag-pill{
+  background: rgba(246,241,231,0.18); color: rgba(246,241,231,0.85);
+}
+
 .quote-lines-editor{ display:flex; flex-direction:column; gap:10px; margin: 4px 0 10px; }
 .quote-line-row{
   display:flex; align-items:flex-start; gap:8px; background: var(--white);
