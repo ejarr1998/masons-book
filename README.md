@@ -1,3 +1,4 @@
+[README.md](https://github.com/user-attachments/files/29947877/README.md)
 # The Jarrett Book
 
 A private, install-on-your-phone place to keep Mason's (and future siblings')
@@ -60,22 +61,19 @@ install the edit link on their own phone.
 
 ## Adding a second (or third, or fourth) kid
 
-Open `app.js`, find the `KIDS` array near the top:
-```js
-const KIDS = [
-  { id: "mason", name: "Mason", birthdate: "2026-11-24" }
-];
-```
-Add a new entry, e.g.:
-```js
-const KIDS = [
-  { id: "mason", name: "Mason", birthdate: "2026-11-24" },
-  { id: "sibling2", name: "Their Name", birthdate: "YYYY-MM-DD" }
-];
-```
-Save, commit, and push — a new tab appears automatically, and any entry
-you tag with that kid's chip will show on their page and, if tagged with
-both, the shared Family Feed too. No data migration needed.
+No code changes needed — this is done right in the app now:
+
+1. Open the **edit link** and unlock with your PIN
+2. Tap the small **⚙️ gear icon** in the top-right of the header (next to
+   "Edit mode") — this is intentionally tucked away since you'll only use
+   it a couple of times over many years
+3. Tap **+ Add a child**, enter their name and birthdate, save
+
+A new tab appears automatically, and any entry you tag with that kid's
+chip will show on their page and, if tagged with both, the shared Family
+Feed too. Kids are stored in Firestore's `kids` collection — if you ever
+want to double check or manually fix something, you can also edit it
+directly from the Firebase console (Firestore Database → `kids` collection).
 
 ## A few honest notes
 
