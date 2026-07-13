@@ -209,13 +209,14 @@ input, textarea, select{ font-family: inherit; }
 .stat-num{ font-weight:700; font-size: 18px; display:block; }
 .stat-label{ font-size: 9.5px; text-transform:uppercase; letter-spacing:0.06em; color: rgba(246,241,231,0.6); margin-top:2px; display:block; }
 
-.card.quote{ background: var(--rust); color: var(--parchment); }
-.card.quote .card-date{ color: rgba(246,241,231,0.7); }
-.card.quote .card-tag{ background: rgba(246,241,231,0.18); color:#fff; }
-.card.quote .card-kids{ color: rgba(246,241,231,0.7); }
+.card.funnything{ background: var(--rust); color: var(--parchment); }
+.card.funnything .card-date{ color: rgba(246,241,231,0.7); }
+.card.funnything .card-tag{ background: rgba(246,241,231,0.18); color:#fff; }
+.card.funnything .card-kids{ color: rgba(246,241,231,0.7); }
 .quote-mark{ font-size: 36px; line-height:0.6; color: rgba(246,241,231,0.5); display:block; margin-bottom: 6px; }
-.card.quote .card-title{ color: #fff; font-size: 17px; line-height:1.35; }
-.card.quote .card-text{ color: rgba(246,241,231,0.85); margin-top:6px;}
+.card.funnything .card-title{ color: #fff; font-size: 17px; line-height:1.35; }
+.card.funnything .card-text{ color: rgba(246,241,231,0.85); margin-top:6px;}
+.card.funnything .card-context{ color: rgba(246,241,231,0.65); }
 
 .card.letter{ background: var(--taupe); }
 .card.letter .card-title{ color: var(--forest); }
