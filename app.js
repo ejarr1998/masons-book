@@ -149,7 +149,7 @@ function listenToEntries() {
   const q = query(collection(db, "entries"), orderBy("date", "desc"));
   onSnapshot(q, (snapshot) => {
     entries = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderDateFilters();
+    updateDateFilterButton();
     renderFeed();
   }, (err) => {
     console.error("Firestore listen error:", err);
@@ -207,42 +207,87 @@ function renderPills() {
 
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-function renderDateFilters() {
-  const yearPillsEl = document.getElementById("yearPills");
-  const monthPillsEl = document.getElementById("monthPills");
+function dateFilterLabel() {
+  if (activeYearFilter === "all") return "📅 All dates";
+  if (activeMonthFilter === "all") return `📅 ${activeYearFilter}`;
+  return `📅 ${MONTH_NAMES[activeMonthFilter]} ${activeYearFilter}`;
+}
 
-  // Years with at least one entry, newest first.
-  const years = Array.from(new Set(
+function updateDateFilterButton() {
+  const btn = document.getElementById("dateFilterBtn");
+  if (btn) btn.textContent = dateFilterLabel();
+}
+
+function getEntryYears() {
+  return Array.from(new Set(
     entries.map(e => parseLocalDate(e.date).getFullYear()).filter(y => !isNaN(y))
   )).sort((a, b) => b - a);
+}
+
+function openDateFilterSheet() {
+  renderDateFilterSheet();
+  document.getElementById("addSheetOverlay").classList.add("open");
+}
+
+function renderDateFilterSheet() {
+  const content = document.getElementById("addSheetContent");
+  const years = getEntryYears();
 
   if (years.length === 0) {
-    yearPillsEl.innerHTML = "";
-    monthPillsEl.style.display = "none";
+    content.innerHTML = `
+      <div class="sheet-title">📅 Filter by date</div>
+      <div class="feed-empty" style="padding:20px 0;">No entries yet to filter by.</div>
+      <button class="btn-secondary" id="closeDateFilterBtn">Close</button>
+    `;
+    document.getElementById("closeDateFilterBtn").addEventListener("click", closeAddSheet);
     return;
   }
 
-  yearPillsEl.innerHTML = [`<div class="pill ${activeYearFilter === "all" ? "active" : ""}" data-year="all">All years</div>`]
-    .concat(years.map(y => `<div class="pill ${activeYearFilter === y ? "active" : ""}" data-year="${y}">${y}</div>`))
-    .join("");
+  content.innerHTML = `
+    <div class="sheet-title">📅 Filter by date</div>
+    <div class="field">
+      <label>Year</label>
+      <div class="chip-select" id="yearChips">
+        <div class="chip ${activeYearFilter === "all" ? "selected" : ""}" data-year="all">All years</div>
+        ${years.map(y => `<div class="chip ${activeYearFilter === y ? "selected" : ""}" data-year="${y}">${y}</div>`).join("")}
+      </div>
+    </div>
+    <div class="field" id="monthField" style="display:${activeYearFilter === "all" ? "none" : "block"};">
+      <label>Month</label>
+      <div class="chip-select" id="monthChips"></div>
+    </div>
+    <button class="btn-primary" id="applyDateFilterBtn">Done</button>
+    <button class="btn-secondary" id="clearDateFilterBtn">Clear filter</button>
+  `;
 
-  yearPillsEl.querySelectorAll(".pill").forEach(el => {
-    el.addEventListener("click", () => {
-      const val = el.dataset.year;
+  renderMonthChipsForSheet();
+
+  content.querySelectorAll("#yearChips .chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const val = chip.dataset.year;
       activeYearFilter = val === "all" ? "all" : parseInt(val, 10);
       activeMonthFilter = "all";
-      renderDateFilters();
-      renderFeed();
+      renderDateFilterSheet(); // re-render so month field appears/updates
     });
   });
 
-  if (activeYearFilter === "all") {
-    monthPillsEl.style.display = "none";
-    monthPillsEl.innerHTML = "";
-    return;
-  }
+  document.getElementById("applyDateFilterBtn").addEventListener("click", () => {
+    updateDateFilterButton();
+    renderFeed();
+    closeAddSheet();
+  });
+  document.getElementById("clearDateFilterBtn").addEventListener("click", () => {
+    activeYearFilter = "all";
+    activeMonthFilter = "all";
+    updateDateFilterButton();
+    renderFeed();
+    closeAddSheet();
+  });
+}
 
-  // Only show months that actually have an entry in the selected year.
+function renderMonthChipsForSheet() {
+  if (activeYearFilter === "all") return;
+  const monthChips = document.getElementById("monthChips");
   const monthsWithEntries = Array.from(new Set(
     entries
       .map(e => parseLocalDate(e.date))
@@ -250,17 +295,15 @@ function renderDateFilters() {
       .map(d => d.getMonth())
   )).sort((a, b) => a - b);
 
-  monthPillsEl.style.display = "flex";
-  monthPillsEl.innerHTML = [`<div class="pill ${activeMonthFilter === "all" ? "active" : ""}" data-month="all">All months</div>`]
-    .concat(monthsWithEntries.map(m => `<div class="pill ${activeMonthFilter === m ? "active" : ""}" data-month="${m}">${MONTH_NAMES[m]}</div>`))
+  monthChips.innerHTML = [`<div class="chip ${activeMonthFilter === "all" ? "selected" : ""}" data-month="all">All months</div>`]
+    .concat(monthsWithEntries.map(m => `<div class="chip ${activeMonthFilter === m ? "selected" : ""}" data-month="${m}">${MONTH_NAMES[m]}</div>`))
     .join("");
 
-  monthPillsEl.querySelectorAll(".pill").forEach(el => {
-    el.addEventListener("click", () => {
-      const val = el.dataset.month;
+  monthChips.querySelectorAll(".chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const val = chip.dataset.month;
       activeMonthFilter = val === "all" ? "all" : parseInt(val, 10);
-      renderDateFilters();
-      renderFeed();
+      renderMonthChipsForSheet();
     });
   });
 }
@@ -1314,6 +1357,7 @@ async function saveNewKid() {
 function bindGlobalEvents() {
   document.getElementById("fab").addEventListener("click", openAddSheet);
   document.getElementById("manageKidsBtn").addEventListener("click", openManageKidsSheet);
+  document.getElementById("dateFilterBtn").addEventListener("click", openDateFilterSheet);
   document.getElementById("addSheetOverlay").addEventListener("click", (e) => {
     if (e.target.id === "addSheetOverlay") closeAddSheet();
   });
