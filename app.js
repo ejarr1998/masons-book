@@ -64,12 +64,7 @@ let activeCategoryFilter = "all";
 let selectedType = null;
 let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
-let customCategories = {}; // user-created entry types, shared via Firestore
 let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid, shared via Firestore
-
-function getAllCategories() {
-  return { ...CATEGORIES, ...customCategories };
-}
 
 // ============================================================
 // INIT
@@ -88,8 +83,6 @@ function init() {
 function listenToCategoryConfig() {
   onSnapshot(doc(db, "settings", "categoryConfig"), (snap) => {
     const data = snap.exists() ? snap.data() : {};
-    customCategories = {};
-    (data.custom || []).forEach(c => { customCategories[c.id] = { label: c.label, emoji: c.emoji, tagLabel: c.label }; });
     hiddenCategoryIds = data.hidden || [];
     renderPills();
     renderFeed();
@@ -186,7 +179,7 @@ function updateHeaderSub() {
 
 function renderPills() {
   const pillsEl = document.getElementById("pills");
-  const all = getAllCategories();
+  const all = CATEGORIES;
   const cats = [{ id: "all", label: "All" }, ...Object.entries(all).map(([id, c]) => ({ id, label: c.label }))];
   pillsEl.innerHTML = cats.map(c =>
     `<div class="pill ${activeCategoryFilter === c.id ? 'active' : ''}" data-cat="${c.id}">${c.label}</div>`
@@ -262,7 +255,7 @@ function renderFeed() {
 }
 
 function renderCard(e) {
-  const cat = getAllCategories()[e.category] || CATEGORIES.photo;
+  const cat = CATEGORIES[e.category] || CATEGORIES.photo;
   const kidsTxt = kidsLabel(e.kids);
   const editControls = isEditMode ? `
     <div class="card-edit-controls">
@@ -507,11 +500,11 @@ function closeAddSheet() {
 const CATEGORY_ORDER_KEY = "masonsbook_category_order";
 
 function getCategoryOrder() {
-  const defaultOrder = Object.keys(getAllCategories());
+  const defaultOrder = Object.keys(CATEGORIES);
   const stored = localStorage.getItem(CATEGORY_ORDER_KEY);
   if (!stored) return defaultOrder;
   try {
-    const saved = JSON.parse(stored).filter(id => getAllCategories()[id]);
+    const saved = JSON.parse(stored).filter(id => CATEGORIES[id]);
     const missing = defaultOrder.filter(id => !saved.includes(id));
     return [...saved, ...missing];
   } catch {
@@ -525,11 +518,10 @@ function saveCategoryOrder(order) {
 
 function renderTypePicker() {
   const content = document.getElementById("addSheetContent");
-  const all = getAllCategories();
+  const all = CATEGORIES;
   const order = getCategoryOrder().filter(id => !hiddenCategoryIds.includes(id) && all[id]);
   content.innerHTML = `
     <div class="sheet-title">Add a moment</div>
-    <div class="type-hint" id="typeHint">Tap to add · press and hold to rearrange</div>
     <div class="type-grid" id="typeGrid">
       ${order.map(id => {
         const c = all[id];
@@ -542,73 +534,13 @@ function renderTypePicker() {
     </div>
     <button class="collapse-toggle" id="manageTypesLink" style="margin-top:6px;">⚙ Manage entry types</button>
   `;
-  bindTypeGridReorder();
-  document.getElementById("manageTypesLink").addEventListener("click", renderManageCategories);
-}
-
-function bindTypeGridReorder() {
-  const grid = document.getElementById("typeGrid");
-  const LONG_PRESS_MS = 450;
-  const MOVE_CANCEL_THRESHOLD = 10;
-
-  grid.querySelectorAll(".type-btn").forEach(btn => {
-    let pressTimer = null;
-    let startX = 0, startY = 0;
-    let dragging = false;
-    let moved = false;
-
-    btn.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      startX = e.clientX; startY = e.clientY;
-      moved = false;
-      pressTimer = setTimeout(() => {
-        dragging = true;
-        btn.setPointerCapture(e.pointerId);
-        btn.classList.add("dragging");
-        if (navigator.vibrate) navigator.vibrate(30);
-        document.getElementById("typeHint").textContent = "Drag to reorder, then let go";
-      }, LONG_PRESS_MS);
+  content.querySelectorAll(".type-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      selectedType = btn.dataset.type;
+      renderEntryForm();
     });
-
-    btn.addEventListener("pointermove", (e) => {
-      const dx = Math.abs(e.clientX - startX);
-      const dy = Math.abs(e.clientY - startY);
-      if (!dragging && (dx > MOVE_CANCEL_THRESHOLD || dy > MOVE_CANCEL_THRESHOLD)) {
-        clearTimeout(pressTimer);
-        moved = true;
-      }
-      if (dragging) {
-        moved = true;
-        const target = document.elementFromPoint(e.clientX, e.clientY);
-        const targetBtn = target ? target.closest(".type-btn") : null;
-        if (targetBtn && targetBtn !== btn && targetBtn.parentElement === grid) {
-          const all = Array.from(grid.children);
-          if (all.indexOf(targetBtn) < all.indexOf(btn)) {
-            grid.insertBefore(btn, targetBtn);
-          } else {
-            grid.insertBefore(btn, targetBtn.nextSibling);
-          }
-        }
-      }
-    });
-
-    const endPress = () => {
-      clearTimeout(pressTimer);
-      if (dragging) {
-        dragging = false;
-        btn.classList.remove("dragging");
-        const newOrder = Array.from(grid.children).map(el => el.dataset.type);
-        saveCategoryOrder(newOrder);
-        document.getElementById("typeHint").textContent = "Tap to add · press and hold to rearrange";
-      } else if (!moved) {
-        selectedType = btn.dataset.type;
-        renderEntryForm();
-      }
-    };
-
-    btn.addEventListener("pointerup", endPress);
-    btn.addEventListener("pointercancel", () => { clearTimeout(pressTimer); dragging = false; btn.classList.remove("dragging"); });
   });
+  document.getElementById("manageTypesLink").addEventListener("click", () => renderManageCategories());
 }
 
 function lastUsedKids() {
@@ -619,7 +551,7 @@ function lastUsedKids() {
 
 function renderEntryForm(existing) {
   const content = document.getElementById("addSheetContent");
-  const cat = getAllCategories()[selectedType];
+  const cat = CATEGORIES[selectedType];
   const defaultKids = existing ? (existing.kids || []) : lastUsedKids();
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -924,84 +856,96 @@ function showToast(msg) {
 // MANAGE ENTRY TYPES SHEET
 // ============================================================
 
-function renderManageCategories(showAddForm) {
+function renderManageCategories() {
   const content = document.getElementById("addSheetContent");
-  const all = getAllCategories();
-  const order = getCategoryOrder().filter(id => all[id]);
+  const order = getCategoryOrder().filter(id => CATEGORIES[id]);
 
   content.innerHTML = `
     <div class="sheet-title">⚙ Manage entry types</div>
-    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
-      ${order.map(id => {
-        const c = all[id];
-        const hidden = hiddenCategoryIds.includes(id);
-        return `
-        <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--white); border:1px solid var(--taupe); border-radius:12px; ${hidden ? 'opacity:0.5;' : ''}">
-          <div style="display:flex; align-items:center; gap:10px;">
-            <span style="font-size:18px;">${c.emoji}</span>
-            <span style="font-weight:700; font-size:14px;">${escapeHtml(c.label)}</span>
-          </div>
-          <button class="chip ${hidden ? '' : 'selected'}" data-toggle-cat="${id}" style="padding:6px 12px; font-size:11.5px;">${hidden ? 'Hidden' : 'Visible'}</button>
-        </div>`;
-      }).join("")}
+    <div class="type-hint">Drag the ⠿ handle to reorder · tap Visible/Hidden to toggle</div>
+    <div id="catList" style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+      ${order.map(id => renderCatRow(id)).join("")}
     </div>
-    ${showAddForm ? `
-      <div class="field"><label>Emoji</label><input type="text" id="fCatEmoji" placeholder="e.g. 🩺" maxlength="4"></div>
-      <div class="field"><label>Name</label><input type="text" id="fCatLabel" placeholder="e.g. Doctor Visit"></div>
-      <button class="btn-primary" id="saveCatBtn">Save entry type</button>
-      <button class="btn-secondary" id="cancelAddCatBtn">Cancel</button>
-    ` : `
-      <button class="btn-primary" id="showAddCatFormBtn">+ Create custom type</button>
-      <button class="btn-secondary" id="backToPickerBtn">Back</button>
-    `}
+    <button class="btn-secondary" id="backToPickerBtn">Back</button>
   `;
 
-  content.querySelectorAll("[data-toggle-cat]").forEach(btn => {
+  bindCatRowEvents();
+  document.getElementById("backToPickerBtn").addEventListener("click", renderTypePicker);
+}
+
+function renderCatRow(id) {
+  const c = CATEGORIES[id];
+  const hidden = hiddenCategoryIds.includes(id);
+  return `
+    <div class="cat-row" data-cat-row="${id}" style="${hidden ? 'opacity:0.5;' : ''}">
+      <span class="cat-drag-handle" data-drag="${id}">⠿</span>
+      <span style="font-size:18px;">${c.emoji}</span>
+      <span style="font-weight:700; font-size:14px; flex:1;">${escapeHtml(c.label)}</span>
+      <button class="chip ${hidden ? '' : 'selected'}" data-toggle-cat="${id}" style="padding:6px 12px; font-size:11.5px;">${hidden ? 'Hidden' : 'Visible'}</button>
+    </div>`;
+}
+
+function bindCatRowEvents() {
+  const list = document.getElementById("catList");
+
+  // Instant-feedback hide/show toggle
+  list.querySelectorAll("[data-toggle-cat]").forEach(btn => {
     btn.addEventListener("click", () => toggleCategoryHidden(btn.dataset.toggleCat));
   });
 
-  if (showAddForm) {
-    document.getElementById("saveCatBtn").addEventListener("click", saveCustomCategory);
-    document.getElementById("cancelAddCatBtn").addEventListener("click", () => renderManageCategories(false));
-  } else {
-    document.getElementById("showAddCatFormBtn").addEventListener("click", () => renderManageCategories(true));
-    document.getElementById("backToPickerBtn").addEventListener("click", renderTypePicker);
-  }
+  // Plain drag (no long-press delay) via the handle only
+  list.querySelectorAll(".cat-drag-handle").forEach(handle => {
+    const row = handle.closest(".cat-row");
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      row.classList.add("dragging");
+
+      const onMove = (moveEvent) => {
+        const target = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+        const targetRow = target ? target.closest(".cat-row") : null;
+        if (targetRow && targetRow !== row && targetRow.parentElement === list) {
+          const all = Array.from(list.children);
+          if (all.indexOf(targetRow) < all.indexOf(row)) {
+            list.insertBefore(row, targetRow);
+          } else {
+            list.insertBefore(row, targetRow.nextSibling);
+          }
+        }
+      };
+      const onUp = () => {
+        row.classList.remove("dragging");
+        const newOrder = Array.from(list.children).map(el => el.dataset.catRow);
+        saveCategoryOrder(newOrder);
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        handle.removeEventListener("pointercancel", onUp);
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointercancel", onUp);
+    });
+  });
 }
 
 async function toggleCategoryHidden(id) {
-  const newHidden = hiddenCategoryIds.includes(id)
+  // Instant feedback: update locally and re-render immediately, then persist.
+  hiddenCategoryIds = hiddenCategoryIds.includes(id)
     ? hiddenCategoryIds.filter(x => x !== id)
     : [...hiddenCategoryIds, id];
+  const row = document.querySelector(`[data-cat-row="${id}"]`);
+  if (row) {
+    const nowHidden = hiddenCategoryIds.includes(id);
+    row.style.opacity = nowHidden ? "0.5" : "1";
+    const btn = row.querySelector("[data-toggle-cat]");
+    btn.textContent = nowHidden ? "Hidden" : "Visible";
+    btn.classList.toggle("selected", !nowHidden);
+  }
   try {
-    await setDoc(doc(db, "settings", "categoryConfig"), { hidden: newHidden }, { merge: true });
+    await setDoc(doc(db, "settings", "categoryConfig"), { hidden: hiddenCategoryIds }, { merge: true });
   } catch (err) {
     console.error("Toggle category error:", err);
-    showToast("Couldn't update — try again");
-  }
-}
-
-async function saveCustomCategory() {
-  const emoji = getVal("fCatEmoji").trim() || "📌";
-  const label = getVal("fCatLabel").trim();
-  if (!label) { showToast("Give it a name first"); return; }
-
-  const btn = document.getElementById("saveCatBtn");
-  btn.disabled = true;
-  btn.textContent = "Saving...";
-  try {
-    const id = "custom_" + label.toLowerCase().replace(/[^a-z0-9]+/g, "") + "_" + Date.now().toString(36);
-    const configRef = doc(db, "settings", "categoryConfig");
-    const existingCustom = Object.entries(customCategories).map(([cid, c]) => ({ id: cid, label: c.label, emoji: c.emoji }));
-    await setDoc(configRef, { custom: [...existingCustom, { id, label, emoji }] }, { merge: true });
-    showToast(`${label} added`);
-    renderManageCategories(false);
-  } catch (err) {
-    console.error("Save custom category error:", err);
     showToast("Couldn't save — try again");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Save entry type";
   }
 }
 
