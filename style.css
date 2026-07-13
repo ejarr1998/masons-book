@@ -354,7 +354,13 @@ input, textarea, select{ font-family: inherit; }
 }
 
 .photo-input-preview{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
-.photo-input-preview img{ width:64px; height:64px; object-fit:cover; border-radius:10px; }
+.photo-thumb{ position:relative; width:64px; height:64px; }
+.photo-thumb img{ width:64px; height:64px; object-fit:cover; border-radius:10px; display:block; }
+.photo-thumb-remove{
+  position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%;
+  background: var(--danger); color:#fff; border:2px solid var(--parchment);
+  font-size:13px; line-height:1; display:flex; align-items:center; justify-content:center; cursor:pointer;
+}
 
 .btn-primary{
   width:100%; padding: 14px; border-radius: 14px; border:none;
