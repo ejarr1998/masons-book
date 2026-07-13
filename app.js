@@ -70,6 +70,8 @@ let activeKidFilter = "all";
 let activeCategoryFilter = "all";
 let activeYearFilter = "all";
 let activeMonthFilter = "all";
+let TAGS = []; // user-created tags, shared via Firestore, e.g. "Doctor Visit", "Grandma's House"
+let activeTagFilters = []; // multi-select: entry matches if it has ANY of these tags
 let expandedFilterSections = { people: false, type: false, dates: false };
 let selectedType = null;
 let pendingPhotos = []; // File objects staged for upload in the add sheet
@@ -88,9 +90,18 @@ function init() {
   checkEditRoute();
   listenToKids();
   listenToCategoryConfig();
+  listenToTags();
   listenToEntries();
   registerServiceWorker();
   bindGlobalEvents();
+}
+
+function listenToTags() {
+  const q = query(collection(db, "tags"), orderBy("name", "asc"));
+  onSnapshot(q, (snapshot) => {
+    TAGS = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderFeed(); // tag pills on cards depend on TAGS being loaded
+  }, (err) => console.error("Tags listen error:", err));
 }
 
 function listenToCategoryConfig() {
@@ -184,7 +195,7 @@ function getEntryYears() {
 function updateFiltersButtonBadge() {
   const btn = document.getElementById("filtersTriggerBtn");
   if (!btn) return;
-  const activeCount = [activeKidFilter !== "all", activeCategoryFilter !== "all", activeYearFilter !== "all"].filter(Boolean).length;
+  const activeCount = [activeKidFilter !== "all", activeCategoryFilter !== "all", activeYearFilter !== "all", activeTagFilters.length > 0].filter(Boolean).length;
   btn.innerHTML = `Filters${activeCount > 0 ? ` <span class="filters-badge">${activeCount}</span>` : ""}`;
 }
 
@@ -208,6 +219,15 @@ function datesSummary() {
   if (activeYearFilter === "all") return "All dates";
   if (activeMonthFilter === "all") return `${activeYearFilter}`;
   return `${MONTH_NAMES[activeMonthFilter]} ${activeYearFilter}`;
+}
+
+function tagsSummary() {
+  if (activeTagFilters.length === 0) return "All tags";
+  if (activeTagFilters.length === 1) {
+    const t = TAGS.find(t => t.id === activeTagFilters[0]);
+    return t ? t.name : "All tags";
+  }
+  return `${activeTagFilters.length} tags`;
 }
 
 function filterSectionHtml(id, title, summary, bodyHtml) {
@@ -269,6 +289,15 @@ function datesSectionBodyHtml() {
   return html;
 }
 
+function tagsSectionBodyHtml() {
+  if (TAGS.length === 0) {
+    return `<div style="font-size:13px; color:var(--ink-soft);">No tags created yet — add one from the entry form when creating or editing a moment.</div>`;
+  }
+  return `<div class="chip-select">${TAGS.map(t =>
+    `<div class="chip ${activeTagFilters.includes(t.id) ? 'selected' : ''}" data-tag-filter-chip="${t.id}">${escapeHtml(t.name)}</div>`
+  ).join("")}</div>`;
+}
+
 function renderFiltersSheet() {
   const content = document.getElementById("addSheetContent");
   content.innerHTML = `
@@ -276,6 +305,7 @@ function renderFiltersSheet() {
     ${filterSectionHtml("people", "👪 People", peopleSummary(), peopleSectionBodyHtml())}
     ${filterSectionHtml("type", "🏷️ Type of events", typeSummary(), typeSectionBodyHtml())}
     ${filterSectionHtml("dates", "📅 Dates", datesSummary(), datesSectionBodyHtml())}
+    ${filterSectionHtml("tags", "🔖 Tags", tagsSummary(), tagsSectionBodyHtml())}
     <button class="btn-primary" id="applyFiltersBtn" style="margin-top:10px;">Show results</button>
     <button class="btn-secondary" id="clearAllFiltersBtn">Clear all filters</button>
   `;
@@ -319,6 +349,15 @@ function bindFilterSectionEvents() {
       renderFiltersSheet();
     });
   });
+  content.querySelectorAll("[data-tag-filter-chip]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const id = chip.dataset.tagFilterChip;
+      activeTagFilters = activeTagFilters.includes(id)
+        ? activeTagFilters.filter(t => t !== id)
+        : [...activeTagFilters, id];
+      renderFiltersSheet();
+    });
+  });
 
   document.getElementById("applyFiltersBtn").addEventListener("click", () => {
     updateHeaderSub();
@@ -331,6 +370,7 @@ function bindFilterSectionEvents() {
     activeCategoryFilter = "all";
     activeYearFilter = "all";
     activeMonthFilter = "all";
+    activeTagFilters = [];
     updateHeaderSub();
     updateFiltersButtonBadge();
     renderFeed();
@@ -390,7 +430,8 @@ function renderFeed() {
     const entryDate = parseLocalDate(e.date);
     const yearMatch = activeYearFilter === "all" || (!isNaN(entryDate) && entryDate.getFullYear() === activeYearFilter);
     const monthMatch = activeMonthFilter === "all" || (!isNaN(entryDate) && entryDate.getMonth() === activeMonthFilter);
-    return kidMatch && catMatch && yearMatch && monthMatch;
+    const tagMatch = activeTagFilters.length === 0 || (e.tags || []).some(t => activeTagFilters.includes(t));
+    return kidMatch && catMatch && yearMatch && monthMatch && tagMatch;
   });
 
   if (filtered.length === 0) {
@@ -505,6 +546,10 @@ function renderCard(e) {
       <div class="card-body">
         ${body}
         ${kidsTxt ? `<div class="card-kids" style="margin-top:8px;">${escapeHtml(kidsTxt)}</div>` : ""}
+        ${(e.tags && e.tags.length) ? `<div class="entry-tags">${e.tags.map(tid => {
+          const t = TAGS.find(x => x.id === tid);
+          return t ? `<span class="entry-tag-pill">#${escapeHtml(t.name)}</span>` : "";
+        }).join("")}</div>` : ""}
       </div>
     </div>`;
 }
@@ -715,6 +760,39 @@ function renderTypePicker() {
   document.getElementById("manageTypesLink").addEventListener("click", () => renderManageCategories());
 }
 
+async function addNewTagInline() {
+  const input = document.getElementById("newTagInput");
+  const name = input.value.trim();
+  if (!name) return;
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || ("tag" + Date.now());
+
+  const container = document.getElementById("tagChips");
+  const existingChip = container.querySelector(`[data-tag="${id}"]`);
+  if (existingChip) {
+    // Tag already exists — just select it rather than creating a duplicate.
+    existingChip.classList.add("selected");
+    input.value = "";
+    return;
+  }
+
+  // Optimistic UI: show the chip immediately, selected, before the write completes.
+  if (!TAGS.find(t => t.id === id)) TAGS.push({ id, name });
+  const chip = document.createElement("div");
+  chip.className = "chip selected";
+  chip.dataset.tag = id;
+  chip.textContent = name;
+  chip.addEventListener("click", () => chip.classList.toggle("selected"));
+  container.appendChild(chip);
+  input.value = "";
+
+  try {
+    await setDoc(doc(db, "tags", id), { name });
+  } catch (err) {
+    console.error("Add tag error:", err);
+    showToast("Couldn't save tag — try again");
+  }
+}
+
 function lastUsedKids() {
   const stored = localStorage.getItem("masonsbook_last_kids");
   if (stored) return JSON.parse(stored);
@@ -733,6 +811,19 @@ function renderEntryForm(existing) {
       <label>Who's this about</label>
       <div class="chip-select" id="kidChips">
         ${KIDS.map(k => `<div class="chip ${defaultKids.includes(k.id) ? 'selected' : ''}" data-kid="${k.id}">${k.name}</div>`).join("")}
+      </div>
+    </div>`;
+
+  const defaultTags = existing ? (existing.tags || []) : [];
+  const tagChips = `
+    <div class="field">
+      <label>Tags (optional)</label>
+      <div class="chip-select" id="tagChips">
+        ${TAGS.map(t => `<div class="chip ${defaultTags.includes(t.id) ? 'selected' : ''}" data-tag="${t.id}">${escapeHtml(t.name)}</div>`).join("")}
+      </div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <input type="text" id="newTagInput" placeholder="Create a new tag..." style="flex:1;">
+        <button type="button" class="btn-secondary" id="addNewTagBtn" style="width:auto; margin-top:0; padding:9px 16px; white-space:nowrap;">Add</button>
       </div>
     </div>`;
 
@@ -836,6 +927,7 @@ function renderEntryForm(existing) {
     ${dateField}
     ${typeFields}
     ${kidChips}
+    ${tagChips}
     <button class="btn-primary" id="saveEntryBtn">Save</button>
     <button class="btn-secondary" id="cancelEntryBtn">Cancel</button>
   `;
@@ -843,6 +935,15 @@ function renderEntryForm(existing) {
   // Kid chip toggling
   content.querySelectorAll("#kidChips .chip").forEach(chip => {
     chip.addEventListener("click", () => chip.classList.toggle("selected"));
+  });
+
+  // Tag chip toggling + inline new-tag creation
+  content.querySelectorAll("#tagChips .chip").forEach(chip => {
+    chip.addEventListener("click", () => chip.classList.toggle("selected"));
+  });
+  document.getElementById("addNewTagBtn").addEventListener("click", addNewTagInline);
+  document.getElementById("newTagInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); addNewTagInline(); }
   });
 
   // Milestone suggestion chips
@@ -1093,9 +1194,10 @@ async function saveEntry() {
   try {
     const selectedKids = Array.from(document.querySelectorAll("#kidChips .chip.selected")).map(c => c.dataset.kid);
     localStorage.setItem("masonsbook_last_kids", JSON.stringify(selectedKids));
+    const selectedTags = Array.from(document.querySelectorAll("#tagChips .chip.selected")).map(c => c.dataset.tag);
 
     const date = document.getElementById("fDate").value;
-    const data = { category: selectedType, kids: selectedKids, date, updatedAt: serverTimestamp() };
+    const data = { category: selectedType, kids: selectedKids, tags: selectedTags, date, updatedAt: serverTimestamp() };
 
     switch (selectedType) {
       case "birth":
