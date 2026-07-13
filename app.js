@@ -68,6 +68,8 @@ let entries = [];
 let isEditMode = false;
 let activeKidFilter = "all";
 let activeCategoryFilter = "all";
+let activeYearFilter = "all";
+let activeMonthFilter = "all";
 let selectedType = null;
 let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
@@ -147,6 +149,7 @@ function listenToEntries() {
   const q = query(collection(db, "entries"), orderBy("date", "desc"));
   onSnapshot(q, (snapshot) => {
     entries = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderDateFilters();
     renderFeed();
   }, (err) => {
     console.error("Firestore listen error:", err);
@@ -202,6 +205,66 @@ function renderPills() {
   });
 }
 
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function renderDateFilters() {
+  const yearPillsEl = document.getElementById("yearPills");
+  const monthPillsEl = document.getElementById("monthPills");
+
+  // Years with at least one entry, newest first.
+  const years = Array.from(new Set(
+    entries.map(e => parseLocalDate(e.date).getFullYear()).filter(y => !isNaN(y))
+  )).sort((a, b) => b - a);
+
+  if (years.length === 0) {
+    yearPillsEl.innerHTML = "";
+    monthPillsEl.style.display = "none";
+    return;
+  }
+
+  yearPillsEl.innerHTML = [`<div class="pill ${activeYearFilter === "all" ? "active" : ""}" data-year="all">All years</div>`]
+    .concat(years.map(y => `<div class="pill ${activeYearFilter === y ? "active" : ""}" data-year="${y}">${y}</div>`))
+    .join("");
+
+  yearPillsEl.querySelectorAll(".pill").forEach(el => {
+    el.addEventListener("click", () => {
+      const val = el.dataset.year;
+      activeYearFilter = val === "all" ? "all" : parseInt(val, 10);
+      activeMonthFilter = "all";
+      renderDateFilters();
+      renderFeed();
+    });
+  });
+
+  if (activeYearFilter === "all") {
+    monthPillsEl.style.display = "none";
+    monthPillsEl.innerHTML = "";
+    return;
+  }
+
+  // Only show months that actually have an entry in the selected year.
+  const monthsWithEntries = Array.from(new Set(
+    entries
+      .map(e => parseLocalDate(e.date))
+      .filter(d => !isNaN(d) && d.getFullYear() === activeYearFilter)
+      .map(d => d.getMonth())
+  )).sort((a, b) => a - b);
+
+  monthPillsEl.style.display = "flex";
+  monthPillsEl.innerHTML = [`<div class="pill ${activeMonthFilter === "all" ? "active" : ""}" data-month="all">All months</div>`]
+    .concat(monthsWithEntries.map(m => `<div class="pill ${activeMonthFilter === m ? "active" : ""}" data-month="${m}">${MONTH_NAMES[m]}</div>`))
+    .join("");
+
+  monthPillsEl.querySelectorAll(".pill").forEach(el => {
+    el.addEventListener("click", () => {
+      const val = el.dataset.month;
+      activeMonthFilter = val === "all" ? "all" : parseInt(val, 10);
+      renderDateFilters();
+      renderFeed();
+    });
+  });
+}
+
 // ============================================================
 // FEED RENDERING
 // ============================================================
@@ -251,7 +314,10 @@ function renderFeed() {
   let filtered = entries.filter(e => {
     const kidMatch = activeKidFilter === "all" || (e.kids || []).includes(activeKidFilter);
     const catMatch = activeCategoryFilter === "all" || e.category === activeCategoryFilter;
-    return kidMatch && catMatch;
+    const entryDate = parseLocalDate(e.date);
+    const yearMatch = activeYearFilter === "all" || (!isNaN(entryDate) && entryDate.getFullYear() === activeYearFilter);
+    const monthMatch = activeMonthFilter === "all" || (!isNaN(entryDate) && entryDate.getMonth() === activeMonthFilter);
+    return kidMatch && catMatch && yearMatch && monthMatch;
   });
 
   if (filtered.length === 0) {
