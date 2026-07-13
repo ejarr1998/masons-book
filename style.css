@@ -259,6 +259,17 @@ input, textarea, select{ font-family: inherit; }
 .type-hint{
   font-size:12px; color: var(--ink-soft); margin: -8px 0 12px; text-align:center;
 }
+.cat-row{
+  display:flex; align-items:center; gap:10px;
+  padding: 10px 12px; background: var(--white); border:1px solid var(--taupe); border-radius:12px;
+  transition: opacity .15s ease, box-shadow .12s ease, transform .12s ease;
+}
+.cat-row.dragging{ box-shadow: 0 10px 24px -6px rgba(42,38,32,0.3); transform: scale(1.02); z-index:5; }
+.cat-drag-handle{
+  font-size:18px; color: var(--ink-soft); cursor:grab; padding: 4px 6px; touch-action:none;
+  -webkit-touch-callout:none; user-select:none; -webkit-user-select:none;
+}
+.cat-drag-handle:active{ cursor:grabbing; }
 .type-grid{ display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom: 6px; touch-action: none; }
 .type-btn{
   display:flex; flex-direction:column; align-items:center; gap:6px;
