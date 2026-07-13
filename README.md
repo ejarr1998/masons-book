@@ -1,4 +1,4 @@
-[README.md](https://github.com/user-attachments/files/29947877/README.md)
+[README.md](https://github.com/user-attachments/files/29973552/README.md)
 # The Jarrett Book
 
 A private, install-on-your-phone place to keep Mason's (and future siblings')
@@ -77,6 +77,12 @@ directly from the Firebase console (Firestore Database → `kids` collection).
 
 ## A few honest notes
 
+- **The "Private" tag**: there's a built-in tag called **Private** (🔒) available
+  in every entry's Tags field. Any entry tagged Private is invisible on the
+  public view link — enforced by the Firestore security rule itself, not just
+  hidden in the app, so it holds even against a direct database query. It still
+  shows normally in edit mode. Good for anything you want in the book but don't
+  want grandparents or anyone else with the view link to see.
 - **The PIN is a convenience gate, not a security system.** There's no
   backend server here, so real protection comes from (a) the edit link
   being long and unguessable, and (b) Firestore/Storage rules requiring a
