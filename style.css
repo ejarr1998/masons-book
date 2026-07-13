@@ -303,6 +303,29 @@ input, textarea, select{ font-family: inherit; }
 .milestone-suggest{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
 .milestone-suggest .chip{ font-size:12.5px; padding:7px 12px; }
 
+.quote-lines-editor{ display:flex; flex-direction:column; gap:10px; margin: 4px 0 10px; }
+.quote-line-row{
+  display:flex; align-items:flex-start; gap:8px; background: var(--white);
+  border:1px solid var(--taupe); border-radius:12px; padding: 10px;
+}
+.quote-line-row .fSpeaker{
+  width: 84px; flex-shrink:0; padding:9px 8px; border-radius:8px; border:1px solid var(--taupe);
+  font-size:13px; font-weight:700; background: var(--parchment-2); color: var(--forest);
+}
+.quote-line-row .fLineText{
+  flex:1; min-height:44px; padding:9px 10px; border-radius:8px; border:1px solid var(--taupe);
+  font-size:14px; resize:vertical;
+}
+.quote-line-remove{
+  width:26px; height:26px; border-radius:50%; border:none; background: var(--parchment-2);
+  color: var(--ink-soft); font-size:15px; flex-shrink:0; cursor:pointer;
+}
+
+.quote-dialogue{ display:flex; flex-direction:column; gap:10px; }
+.quote-line{ line-height:1.4; }
+.quote-speaker{ font-weight:800; font-size:14px; color:#fff; margin-right:4px; }
+.quote-line-text{ font-family:'Caveat', cursive; font-weight:600; font-size:18px; color: rgba(246,241,231,0.92); }
+
 .collapse-toggle{
   font-size:12.5px; font-weight:700; color: var(--rust); background:none; border:none;
   padding: 4px 0; cursor:pointer; margin-bottom: 8px;
