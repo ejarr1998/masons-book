@@ -5,7 +5,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
-  onSnapshot, query, orderBy, serverTimestamp, getDocs
+  onSnapshot, query, orderBy, serverTimestamp, getDocs, getDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   getStorage, ref, uploadBytes, getDownloadURL, deleteObject
@@ -97,7 +97,16 @@ function init() {
 }
 
 function listenToTags() {
-  const q = query(collection(db, "tags"), orderBy("name", "asc"));
+  const tagsCol = collection(db, "tags");
+  // Seed the reserved "Private" tag once, if it doesn't exist yet. Its id is
+  // fixed ("private") so the Firestore rule can reliably key off it.
+  getDoc(doc(tagsCol, "private")).then(snap => {
+    if (!snap.exists()) {
+      setDoc(doc(tagsCol, "private"), { name: "Private", isPrivate: true })
+        .catch(err => console.warn("Private tag seed skipped:", err));
+    }
+  });
+  const q = query(tagsCol, orderBy("name", "asc"));
   onSnapshot(q, (snapshot) => {
     TAGS = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     renderFeed(); // tag pills on cards depend on TAGS being loaded
@@ -225,7 +234,7 @@ function tagsSummary() {
   if (activeTagFilters.length === 0) return "All tags";
   if (activeTagFilters.length === 1) {
     const t = TAGS.find(t => t.id === activeTagFilters[0]);
-    return t ? t.name : "All tags";
+    return t ? tagLabel(t) : "All tags";
   }
   return `${activeTagFilters.length} tags`;
 }
@@ -294,7 +303,7 @@ function tagsSectionBodyHtml() {
     return `<div style="font-size:13px; color:var(--ink-soft);">No tags created yet — add one from the entry form when creating or editing a moment.</div>`;
   }
   return `<div class="chip-select">${TAGS.map(t =>
-    `<div class="chip ${activeTagFilters.includes(t.id) ? 'selected' : ''}" data-tag-filter-chip="${t.id}">${escapeHtml(t.name)}</div>`
+    `<div class="chip ${activeTagFilters.includes(t.id) ? 'selected' : ''}" data-tag-filter-chip="${t.id}">${escapeHtml(tagLabel(t))}</div>`
   ).join("")}</div>`;
 }
 
@@ -548,7 +557,7 @@ function renderCard(e) {
         ${kidsTxt ? `<div class="card-kids" style="margin-top:8px;">${escapeHtml(kidsTxt)}</div>` : ""}
         ${(e.tags && e.tags.length) ? `<div class="entry-tags">${e.tags.map(tid => {
           const t = TAGS.find(x => x.id === tid);
-          return t ? `<span class="entry-tag-pill">#${escapeHtml(t.name)}</span>` : "";
+          return t ? `<span class="entry-tag-pill">${t.isPrivate ? "🔒" : "#"}${escapeHtml(t.name)}</span>` : "";
         }).join("")}</div>` : ""}
       </div>
     </div>`;
@@ -760,6 +769,10 @@ function renderTypePicker() {
   document.getElementById("manageTypesLink").addEventListener("click", () => renderManageCategories());
 }
 
+function tagLabel(t) {
+  return t.isPrivate ? `🔒 ${t.name}` : t.name;
+}
+
 async function addNewTagInline() {
   const input = document.getElementById("newTagInput");
   const name = input.value.trim();
@@ -819,7 +832,7 @@ function renderEntryForm(existing) {
     <div class="field">
       <label>Tags (optional)</label>
       <div class="chip-select" id="tagChips">
-        ${TAGS.map(t => `<div class="chip ${defaultTags.includes(t.id) ? 'selected' : ''}" data-tag="${t.id}">${escapeHtml(t.name)}</div>`).join("")}
+        ${TAGS.map(t => `<div class="chip ${defaultTags.includes(t.id) ? 'selected' : ''}" data-tag="${t.id}">${escapeHtml(tagLabel(t))}</div>`).join("")}
       </div>
       <div style="display:flex; gap:8px; margin-top:8px;">
         <input type="text" id="newTagInput" placeholder="Create a new tag..." style="flex:1;">
