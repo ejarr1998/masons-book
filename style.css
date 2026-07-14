@@ -399,6 +399,13 @@ input, textarea, select{ font-family: inherit; }
 .bump-strip{
   display:flex; gap:10px; overflow-x:auto; padding-bottom:2px; scroll-snap-type:x proximity;
 }
+.bump-strip.expanded{
+  flex-wrap:wrap; overflow-x:visible; scroll-snap-type:none;
+}
+.bump-toggle-btn{
+  margin-top:10px; font-size:12px; font-weight:700; color: rgba(246,241,231,0.75);
+  background:none; border:none; padding:4px 0; cursor:pointer;
+}
 .bump-week-thumb{
   position:relative; width:92px; height:118px; border-radius:12px; overflow:hidden;
   flex-shrink:0; cursor:pointer; scroll-snap-align:start; border:2px solid rgba(246,241,231,0.15);
@@ -493,9 +500,12 @@ input, textarea, select{ font-family: inherit; }
   padding: 9px 18px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer;
 }
 .lightbox-close{ position:absolute; top:20px; right:20px; color:#fff; font-size:28px; background:none; border:none; }
-.lightbox-nav{ position:absolute; top:50%; transform:translateY(-50%); background:none; border:none; color:#fff; font-size:32px; padding: 10px; }
+.lightbox-nav{ position:absolute; top:50%; transform:translateY(-50%); background:none; border:none; color:#fff; font-size:32px; padding: 10px; z-index:6; }
 .lightbox-nav.prev{ left:6px; }
 .lightbox-nav.next{ right:6px; }
+.lightbox-tap-zone{ position:absolute; top:0; bottom:0; width:50%; z-index:4; cursor:pointer; }
+.lightbox-tap-zone.left{ left:0; }
+.lightbox-tap-zone.right{ right:0; }
 
 /* Photo people-tagging: pins, location pill, tag editor */
 .lightbox-img-wrap, .tag-editor-panel .lightbox-img-wrap{ position:relative; display:inline-block; line-height:0; }
