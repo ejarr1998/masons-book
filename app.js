@@ -611,15 +611,17 @@ function renderCard(e) {
       } else if (e.subtype === "bump" && e.weeks && e.weeks.length) {
         const sortedWeeks = [...e.weeks].sort((a, b) => a.week - b.week);
         const latest = sortedWeeks[sortedWeeks.length - 1];
+        const isExpanded = expandedBumpEntries.has(e.id);
         body = `<div class="card-title">Bump Progression</div>
                 <div class="bump-progress-sub">${sortedWeeks.length} update${sortedWeeks.length === 1 ? "" : "s"} so far · latest: week ${latest.week}</div>
-                <div class="bump-strip">
+                <div class="bump-strip ${isExpanded ? "expanded" : ""}" id="bumpStrip-${e.id}">
                   ${sortedWeeks.map((w, i) => `
                     <div class="bump-week-thumb" data-bump-entry="${e.id}" data-bump-idx="${i}">
                       <img src="${w.photo.url}">
                       <span class="bump-week-badge">Wk ${w.week}</span>
                     </div>`).join("")}
-                </div>`;
+                </div>
+                <button class="bump-toggle-btn" data-bump-toggle="${e.id}">${isExpanded ? "▴ Show as scroll" : "▾ Show all weeks"}</button>`;
       } else {
         body = `<div class="card-title">${escapeHtml(e.title || "Pregnancy update")}</div>
                 ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
@@ -695,6 +697,15 @@ function bindCardEvents(filtered) {
       openLightbox(photosWithCaptions, idx, "");
     });
   });
+  document.querySelectorAll("[data-bump-toggle]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const entryId = btn.dataset.bumpToggle;
+      const strip = document.getElementById(`bumpStrip-${entryId}`);
+      const isNowExpanded = strip.classList.toggle("expanded");
+      if (isNowExpanded) expandedBumpEntries.add(entryId); else expandedBumpEntries.delete(entryId);
+      btn.textContent = isNowExpanded ? "▴ Show as scroll" : "▾ Show all weeks";
+    });
+  });
   if (isEditMode) {
     document.querySelectorAll("[data-edit]").forEach(btn => {
       btn.addEventListener("click", () => openEditSheet(btn.dataset.edit));
@@ -709,6 +720,7 @@ function bindCardEvents(filtered) {
 // LIGHTBOX
 // ============================================================
 
+let expandedBumpEntries = new Set(); // entry IDs currently showing the full grid instead of the scroll strip
 let lightboxPhotos = [];
 let lightboxIdx = 0;
 let lightboxCaption = "";
@@ -740,6 +752,17 @@ function updateLightbox() {
 function closeLightbox() {
   document.getElementById("lightbox").classList.remove("open");
   unlockBodyScroll();
+}
+
+function lightboxGoPrev() {
+  if (lightboxPhotos.length <= 1) return;
+  lightboxIdx = (lightboxIdx - 1 + lightboxPhotos.length) % lightboxPhotos.length;
+  updateLightbox();
+}
+function lightboxGoNext() {
+  if (lightboxPhotos.length <= 1) return;
+  lightboxIdx = (lightboxIdx + 1) % lightboxPhotos.length;
+  updateLightbox();
 }
 
 async function downloadCurrentPhoto() {
@@ -2002,14 +2025,10 @@ function bindGlobalEvents() {
   document.getElementById("lightbox").addEventListener("click", (e) => {
     if (e.target.id === "lightbox") closeLightbox();
   });
-  document.getElementById("lightboxPrev").addEventListener("click", () => {
-    lightboxIdx = (lightboxIdx - 1 + lightboxPhotos.length) % lightboxPhotos.length;
-    updateLightbox();
-  });
-  document.getElementById("lightboxNext").addEventListener("click", () => {
-    lightboxIdx = (lightboxIdx + 1) % lightboxPhotos.length;
-    updateLightbox();
-  });
+  document.getElementById("lightboxPrev").addEventListener("click", lightboxGoPrev);
+  document.getElementById("lightboxNext").addEventListener("click", lightboxGoNext);
+  document.getElementById("lightboxTapPrev").addEventListener("click", lightboxGoPrev);
+  document.getElementById("lightboxTapNext").addEventListener("click", lightboxGoNext);
 
   document.getElementById("tagEditorClose").addEventListener("click", closeTagEditor);
   document.getElementById("tagEditorDoneBtn").addEventListener("click", closeTagEditor);
