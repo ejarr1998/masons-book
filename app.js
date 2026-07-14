@@ -1299,6 +1299,12 @@ function getTaggingPhotoData() {
 function openTagEditor(source, index) {
   taggingPhotoRef = { source, index };
   const photoData = getTaggingPhotoData();
+  if (!photoData) {
+    console.warn("openTagEditor: no photo data found for", source, index);
+    showToast("Couldn't open that photo — try re-selecting it");
+    taggingPhotoRef = null;
+    return;
+  }
   if (!photoData.people) photoData.people = [];
 
   const img = document.getElementById("tagEditorImg");
