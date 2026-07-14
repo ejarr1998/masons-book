@@ -86,6 +86,28 @@ let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid,
 // INIT
 // ============================================================
 
+// ============================================================
+// BODY SCROLL LOCK
+// ============================================================
+// While any overlay/sheet is open, the background page must not scroll —
+// if it can, touch gestures become ambiguous between "scroll the page"
+// and "tap something in the modal," which can make taps silently fail to
+// register. Reference-counted so nested overlays (e.g. the photo tag
+// editor opening on top of the entry form) don't unlock prematurely.
+let modalOpenCount = 0;
+function lockBodyScroll() {
+  modalOpenCount++;
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.overflow = "hidden";
+}
+function unlockBodyScroll() {
+  modalOpenCount = Math.max(0, modalOpenCount - 1);
+  if (modalOpenCount === 0) {
+    document.documentElement.style.overflow = "";
+    document.body.style.overflow = "";
+  }
+}
+
 function init() {
   updateHeaderSub();
   updateFiltersButtonBadge();
@@ -262,6 +284,7 @@ function updateFiltersButtonBadge() {
 function openFiltersSheet() {
   renderFiltersSheet();
   document.getElementById("addSheetOverlay").classList.add("open");
+  lockBodyScroll();
 }
 
 function peopleSummary() {
@@ -674,6 +697,7 @@ function openLightbox(photos, idx, caption) {
   lightboxTagsVisible = false; // always start hidden — deliberate tap required to reveal
   updateLightbox();
   document.getElementById("lightbox").classList.add("open");
+  lockBodyScroll();
 }
 function updateLightbox() {
   const photo = lightboxPhotos[lightboxIdx];
@@ -691,6 +715,7 @@ function updateLightbox() {
 }
 function closeLightbox() {
   document.getElementById("lightbox").classList.remove("open");
+  unlockBodyScroll();
 }
 
 async function downloadCurrentPhoto() {
@@ -739,6 +764,7 @@ function openPinScreen() {
     btn.addEventListener("click", () => handlePinKey(btn.dataset.key));
   });
   document.getElementById("pinOverlay").classList.add("open");
+  lockBodyScroll();
 }
 
 function handlePinKey(key) {
@@ -752,6 +778,7 @@ function handlePinKey(key) {
     if (pinInput === EDIT_PIN) {
       localStorage.setItem(DEVICE_AUTH_KEY, "true");
       document.getElementById("pinOverlay").classList.remove("open");
+      unlockBodyScroll();
       enterEditMode();
     } else {
       document.getElementById("pinError").textContent = "Incorrect PIN, try again";
@@ -783,6 +810,7 @@ function openAddSheet() {
   removedPhotoPaths = [];
   renderTypePicker();
   document.getElementById("addSheetOverlay").classList.add("open");
+  lockBodyScroll();
 }
 
 function openEditSheet(entryId) {
@@ -801,12 +829,13 @@ function openEditSheet(entryId) {
   removedPhotoPaths = [];
   renderEntryForm(entry);
   document.getElementById("addSheetOverlay").classList.add("open");
+  lockBodyScroll();
 }
 
 function closeAddSheet() {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   document.getElementById("addSheetOverlay").classList.remove("open");
-  forceLayoutRecalc();
+  unlockBodyScroll();
 }
 
 const CATEGORY_ORDER_KEY = "masonsbook_category_order";
@@ -1315,6 +1344,7 @@ function openTagEditor(source, index) {
 
   renderTagEditorPins();
   document.getElementById("tagEditorOverlay").classList.add("open");
+  lockBodyScroll();
 }
 
 function closeTagEditor() {
@@ -1324,22 +1354,13 @@ function closeTagEditor() {
   if (photoData) photoData.location = document.getElementById("tagEditorLocation").value.trim();
   taggingPhotoRef = null;
 
-  // Blur any focused text field BEFORE hiding the overlay. On some mobile
-  // browsers, closing a fixed-position overlay while the on-screen keyboard
-  // is still open leaves click hit-testing stuck at the pre-keyboard
-  // coordinates until something forces a layout recalculation — which
-  // looks exactly like "nothing happens when I tap anything" until refresh.
+  // Blur any focused text field before hiding the overlay, so the on-screen
+  // keyboard (if any) starts collapsing before the overlay disappears.
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 
   document.getElementById("tagEditorOverlay").classList.remove("open");
   removeTagMiniForm();
-  forceLayoutRecalc();
-}
-
-function forceLayoutRecalc() {
-  // Nudges the browser into recalculating layout/hit-testing after the
-  // on-screen keyboard finishes collapsing (see note above).
-  setTimeout(() => window.scrollTo(window.scrollX, window.scrollY), 60);
+  unlockBodyScroll();
 }
 
 function commitMiniForm() {
@@ -1738,6 +1759,7 @@ async function toggleCategoryHidden(id) {
 function openManageKidsSheet() {
   renderManageKids();
   document.getElementById("addSheetOverlay").classList.add("open");
+  lockBodyScroll();
 }
 
 function renderManageKids(showAddForm) {
@@ -1804,6 +1826,7 @@ function bindGlobalEvents() {
   });
   document.getElementById("pinCancel").addEventListener("click", () => {
     document.getElementById("pinOverlay").classList.remove("open");
+    unlockBodyScroll();
     // strip ?edit=1 from URL
     window.history.replaceState({}, "", window.location.pathname);
   });
