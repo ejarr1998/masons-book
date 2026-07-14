@@ -804,7 +804,9 @@ function openEditSheet(entryId) {
 }
 
 function closeAddSheet() {
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   document.getElementById("addSheetOverlay").classList.remove("open");
+  forceLayoutRecalc();
 }
 
 const CATEGORY_ORDER_KEY = "masonsbook_category_order";
@@ -1321,8 +1323,23 @@ function closeTagEditor() {
   const photoData = getTaggingPhotoData();
   if (photoData) photoData.location = document.getElementById("tagEditorLocation").value.trim();
   taggingPhotoRef = null;
+
+  // Blur any focused text field BEFORE hiding the overlay. On some mobile
+  // browsers, closing a fixed-position overlay while the on-screen keyboard
+  // is still open leaves click hit-testing stuck at the pre-keyboard
+  // coordinates until something forces a layout recalculation — which
+  // looks exactly like "nothing happens when I tap anything" until refresh.
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+
   document.getElementById("tagEditorOverlay").classList.remove("open");
   removeTagMiniForm();
+  forceLayoutRecalc();
+}
+
+function forceLayoutRecalc() {
+  // Nudges the browser into recalculating layout/hit-testing after the
+  // on-screen keyboard finishes collapsing (see note above).
+  setTimeout(() => window.scrollTo(window.scrollX, window.scrollY), 60);
 }
 
 function commitMiniForm() {
