@@ -621,7 +621,10 @@ function renderTagOverlay(photo) {
     html += photo.people.map(p => `
       <div class="photo-tag-pin" style="left:${p.x}%; top:${p.y}%;">
         <span class="photo-tag-dot"></span>
-        <span class="photo-tag-label">${escapeHtml(p.name)}${p.relationship ? `<span class="relationship">${escapeHtml(p.relationship)}</span>` : ""}</span>
+        <span class="photo-tag-label">
+          <span class="name">${escapeHtml(p.name)}</span>
+          ${p.relationship ? `<span class="relationship">${escapeHtml(p.relationship)}</span>` : ""}
+        </span>
       </div>`).join("");
   }
   if (photo.location) {
@@ -1346,7 +1349,7 @@ function renderTagEditorPins() {
     pin.className = "photo-tag-pin";
     pin.style.left = person.x + "%";
     pin.style.top = person.y + "%";
-    pin.innerHTML = `<span class="photo-tag-dot"></span><span class="photo-tag-label">${escapeHtml(person.name)}${person.relationship ? `<span class="relationship">${escapeHtml(person.relationship)}</span>` : ""}</span>`;
+    pin.innerHTML = `<span class="photo-tag-dot"></span><span class="photo-tag-label"><span class="name">${escapeHtml(person.name)}</span>${person.relationship ? `<span class="relationship">${escapeHtml(person.relationship)}</span>` : ""}</span>`;
     bindPinDragOrTap(pin, person, i, layer);
     layer.appendChild(pin);
   });
