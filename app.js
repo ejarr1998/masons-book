@@ -1307,12 +1307,31 @@ function openTagEditor(source, index) {
 }
 
 function closeTagEditor() {
+  commitMiniForm(); // auto-save whatever's currently typed, so nothing gets lost by forgetting a separate Save tap
   // Persist whatever location text is currently in the field.
   const photoData = getTaggingPhotoData();
   if (photoData) photoData.location = document.getElementById("tagEditorLocation").value.trim();
   taggingPhotoRef = null;
   document.getElementById("tagEditorOverlay").classList.remove("open");
   removeTagMiniForm();
+}
+
+function commitMiniForm() {
+  const form = document.getElementById("tagMiniForm");
+  if (!form) return;
+  const name = document.getElementById("miniName").value.trim();
+  if (!name) return; // nothing entered — nothing to commit
+  const relationship = document.getElementById("miniRelationship").value.trim();
+  const x = parseFloat(form.dataset.x);
+  const y = parseFloat(form.dataset.y);
+  const personIndex = form.dataset.personIndex;
+  const photoData = getTaggingPhotoData();
+  if (!photoData) return;
+  if (personIndex !== "") {
+    photoData.people[parseInt(personIndex, 10)] = { name, relationship, x, y };
+  } else {
+    photoData.people.push({ name, relationship, x, y });
+  }
 }
 
 function renderTagEditorPins() {
@@ -1328,10 +1347,7 @@ function renderTagEditorPins() {
     pin.style.left = person.x + "%";
     pin.style.top = person.y + "%";
     pin.innerHTML = `<span class="photo-tag-dot"></span><span class="photo-tag-label">${escapeHtml(person.name)}${person.relationship ? `<span class="relationship">${escapeHtml(person.relationship)}</span>` : ""}</span>`;
-    pin.addEventListener("click", (e) => {
-      e.stopPropagation();
-      showTagMiniForm(person.x, person.y, i);
-    });
+    bindPinDragOrTap(pin, person, i, layer);
     layer.appendChild(pin);
   });
 
@@ -1343,6 +1359,46 @@ function renderTagEditorPins() {
     const y = ((e.clientY - rect.top) / rect.height) * 100;
     showTagMiniForm(x, y, null);
   };
+}
+
+function bindPinDragOrTap(pin, person, index, layer) {
+  const MOVE_THRESHOLD = 6; // px — below this, treat it as a tap, not a drag
+  pin.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    pin.setPointerCapture(e.pointerId);
+    removeTagMiniForm(); // dragging an existing pin while another's popup is open shouldn't leave it stranded
+    const startX = e.clientX, startY = e.clientY;
+    let moved = false;
+
+    const onMove = (moveEvent) => {
+      if (!moved && (Math.abs(moveEvent.clientX - startX) > MOVE_THRESHOLD || Math.abs(moveEvent.clientY - startY) > MOVE_THRESHOLD)) {
+        moved = true;
+      }
+      if (moved) {
+        const rect = layer.getBoundingClientRect();
+        let x = ((moveEvent.clientX - rect.left) / rect.width) * 100;
+        let y = ((moveEvent.clientY - rect.top) / rect.height) * 100;
+        x = Math.max(0, Math.min(100, x));
+        y = Math.max(0, Math.min(100, y));
+        pin.style.left = x + "%";
+        pin.style.top = y + "%";
+        person.x = x;
+        person.y = y;
+      }
+    };
+    const onUp = () => {
+      pin.removeEventListener("pointermove", onMove);
+      pin.removeEventListener("pointerup", onUp);
+      pin.removeEventListener("pointercancel", onUp);
+      if (!moved) {
+        showTagMiniForm(person.x, person.y, index); // it was a tap, not a drag — open the edit popup
+      }
+    };
+    pin.addEventListener("pointermove", onMove);
+    pin.addEventListener("pointerup", onUp);
+    pin.addEventListener("pointercancel", onUp);
+  });
 }
 
 function removeTagMiniForm() {
@@ -1362,6 +1418,11 @@ function showTagMiniForm(x, y, personIndex) {
   form.id = "tagMiniForm";
   form.style.left = x + "%";
   form.style.top = y + "%";
+  // Stash context on the element so closeTagEditor() can auto-commit
+  // whatever's currently typed, even if Save was never explicitly clicked.
+  form.dataset.x = x;
+  form.dataset.y = y;
+  form.dataset.personIndex = isEditing ? personIndex : "";
   form.innerHTML = `
     <input type="text" id="miniName" placeholder="Name" value="${escapeHtml(person.name)}">
     <input type="text" id="miniRelationship" placeholder="Relationship (e.g. Grandmother)" value="${escapeHtml(person.relationship)}">
@@ -1374,14 +1435,8 @@ function showTagMiniForm(x, y, personIndex) {
   document.getElementById("miniName").focus();
 
   document.getElementById("miniSaveBtn").addEventListener("click", () => {
-    const name = document.getElementById("miniName").value.trim();
-    const relationship = document.getElementById("miniRelationship").value.trim();
-    if (!name) { showToast("Enter a name first"); return; }
-    if (isEditing) {
-      photoData.people[personIndex] = { name, relationship, x, y };
-    } else {
-      photoData.people.push({ name, relationship, x, y });
-    }
+    if (!document.getElementById("miniName").value.trim()) { showToast("Enter a name first"); return; }
+    commitMiniForm();
     renderTagEditorPins();
   });
   const cancelBtn = document.getElementById("miniCancelBtn");
