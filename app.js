@@ -5,7 +5,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
-  onSnapshot, query, orderBy, serverTimestamp, getDocs, getDoc
+  onSnapshot, query, orderBy, where, serverTimestamp, getDocs, getDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   getStorage, ref, uploadBytes, getDownloadURL, deleteObject
@@ -78,6 +78,8 @@ let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
 let editingPhotos = []; // existing photos on the entry currently being added/edited (removable)
 let removedPhotoPaths = []; // storage paths to actually delete once the save succeeds
+let pendingPhotoMeta = []; // {location, people} kept index-aligned with pendingPhotos
+let taggingPhotoRef = null; // { source: 'existing'|'pending', index } — which photo the tag editor is open on
 let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid, shared via Firestore
 
 // ============================================================
@@ -158,17 +160,66 @@ function enterEditMode() {
   document.getElementById("modeBadge").classList.add("edit");
   document.getElementById("fab").style.display = "flex";
   document.getElementById("manageKidsBtn").style.display = "flex";
-  signInAnonymously(auth).catch(err => console.error("Auth error:", err));
+  signInAnonymously(auth)
+    .then(() => {
+      // Only now is request.auth actually populated server-side, so only
+      // now can we safely re-subscribe with the unrestricted query.
+      listenToEntries();
+      migrateLegacyPrivacyField();
+    })
+    .catch(err => console.error("Auth error:", err));
   renderFeed();
+}
+
+async function migrateLegacyPrivacyField() {
+  // One-time backfill: entries created before the Private-tag feature existed
+  // have no isPrivate field at all, which means they won't match the
+  // view-mode query's `where("isPrivate", "==", false)` filter and would
+  // silently vanish from the public feed. This fills that field in so they
+  // keep showing up. Safe to run repeatedly — it's a no-op once done.
+  try {
+    const snap = await getDocs(collection(db, "entries"));
+    const updates = [];
+    snap.forEach(d => {
+      if (!("isPrivate" in d.data())) {
+        updates.push(updateDoc(doc(db, "entries", d.id), { isPrivate: false }));
+      }
+    });
+    if (updates.length > 0) {
+      await Promise.all(updates);
+      console.log(`Backfilled isPrivate on ${updates.length} legacy entries.`);
+    }
+  } catch (err) {
+    console.warn("Legacy privacy migration skipped:", err);
+  }
 }
 
 // ============================================================
 // FIRESTORE LISTENERS
 // ============================================================
 
+let unsubscribeEntriesListener = null;
+
 function listenToEntries() {
-  const q = query(collection(db, "entries"), orderBy("date", "desc"));
-  onSnapshot(q, (snapshot) => {
+  // Unsubscribe any existing listener first — this gets called again once
+  // edit mode unlocks, so we can switch from the restricted public query to
+  // the full one without needing a page reload.
+  if (unsubscribeEntriesListener) {
+    unsubscribeEntriesListener();
+    unsubscribeEntriesListener = null;
+  }
+
+  const entriesCol = collection(db, "entries");
+  // Edit mode (signed in) sees everything. View mode only gets entries
+  // explicitly marked isPrivate == false — this is a real query filter,
+  // not just a rule condition, which is what lets Firestore's security
+  // rules actually enforce it (rules can't silently filter a query's
+  // results; the query itself has to be provably restricted).
+  const q = isEditMode
+    ? query(entriesCol, orderBy("date", "desc"))
+    : query(entriesCol, where("isPrivate", "==", false), orderBy("date", "desc"));
+
+  unsubscribeEntriesListener = onSnapshot(q, (snapshot) => {
     entries = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     updateFiltersButtonBadge();
     renderFeed();
@@ -463,7 +514,7 @@ function renderCard(e) {
 
   let photosHtml = "";
   if (e.photos && e.photos.length === 1) {
-    photosHtml = `<div class="photo-hero"><img src="${e.photos[0].url}" data-lightbox="${e.id}" data-idx="0" alt=""></div>`;
+    photosHtml = `<div class="photo-hero"><img src="${e.photos[0].url}" data-lightbox="${e.id}" data-idx="0" alt="">${renderTagOverlay(e.photos[0])}</div>`;
   } else if (e.photos && e.photos.length > 1) {
     photosHtml = `<div class="photo-strip">${e.photos.map((p, i) =>
       `<img src="${p.url}" data-lightbox="${e.id}" data-idx="${i}" alt="">`
@@ -563,6 +614,22 @@ function renderCard(e) {
     </div>`;
 }
 
+function renderTagOverlay(photo) {
+  if (!photo) return "";
+  let html = "";
+  if (photo.people && photo.people.length) {
+    html += photo.people.map(p => `
+      <div class="photo-tag-pin" style="left:${p.x}%; top:${p.y}%;">
+        <span class="photo-tag-dot"></span>
+        <span class="photo-tag-label">${escapeHtml(p.name)}${p.relationship ? `<span class="relationship">${escapeHtml(p.relationship)}</span>` : ""}</span>
+      </div>`).join("");
+  }
+  if (photo.location) {
+    html += `<div class="photo-location-pill">📍 ${escapeHtml(photo.location)}</div>`;
+  }
+  return html;
+}
+
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
@@ -606,6 +673,7 @@ function openLightbox(photos, idx, caption) {
 function updateLightbox() {
   const photo = lightboxPhotos[lightboxIdx];
   document.getElementById("lightboxImg").src = photo.url;
+  document.getElementById("lightboxTagLayer").innerHTML = renderTagOverlay(photo);
   const cap = photo.caption || lightboxCaption || "";
   document.getElementById("lightboxCaption").textContent = cap;
   const showNav = lightboxPhotos.length > 1;
@@ -701,6 +769,7 @@ function openAddSheet() {
   editingEntryId = null;
   selectedType = null;
   pendingPhotos = [];
+  pendingPhotoMeta = [];
   editingPhotos = [];
   removedPhotoPaths = [];
   renderTypePicker();
@@ -713,7 +782,13 @@ function openEditSheet(entryId) {
   editingEntryId = entryId;
   selectedType = entry.category;
   pendingPhotos = [];
-  editingPhotos = entry.photos ? entry.photos.map(p => ({ ...p })) : [];
+  pendingPhotoMeta = [];
+  // Deep-copy photos (including nested people arrays) so in-progress tag
+  // edits don't mutate the live entry until Save is actually pressed.
+  editingPhotos = entry.photos ? entry.photos.map(p => ({
+    ...p,
+    people: (p.people || []).map(person => ({ ...person }))
+  })) : [];
   removedPhotoPaths = [];
   renderEntryForm(entry);
   document.getElementById("addSheetOverlay").classList.add("open");
@@ -1156,18 +1231,22 @@ function renderPhotoPreview() {
   preview.innerHTML = "";
 
   editingPhotos.forEach((p, i) => {
+    if (!p.people) p.people = [];
     preview.innerHTML += `
       <div class="photo-thumb">
         <img src="${p.url}">
         <button type="button" class="photo-thumb-remove" data-remove-existing="${i}" title="Remove photo">×</button>
+        <button type="button" class="photo-thumb-tag-btn" data-tag-existing="${i}" title="Tag people">🏷️</button>
       </div>`;
   });
   pendingPhotos.forEach((file, i) => {
+    if (!pendingPhotoMeta[i]) pendingPhotoMeta[i] = { location: "", people: [] };
     const url = URL.createObjectURL(file);
     preview.innerHTML += `
       <div class="photo-thumb">
         <img src="${url}">
         <button type="button" class="photo-thumb-remove" data-remove-pending="${i}" title="Remove photo">×</button>
+        <button type="button" class="photo-thumb-tag-btn" data-tag-pending="${i}" title="Tag people">🏷️</button>
       </div>`;
   });
 
@@ -1182,9 +1261,128 @@ function renderPhotoPreview() {
   });
   preview.querySelectorAll("[data-remove-pending]").forEach(btn => {
     btn.addEventListener("click", () => {
-      pendingPhotos.splice(parseInt(btn.dataset.removePending, 10), 1);
+      const idx = parseInt(btn.dataset.removePending, 10);
+      pendingPhotos.splice(idx, 1);
+      pendingPhotoMeta.splice(idx, 1);
       renderPhotoPreview();
     });
+  });
+  preview.querySelectorAll("[data-tag-existing]").forEach(btn => {
+    btn.addEventListener("click", () => openTagEditor("existing", parseInt(btn.dataset.tagExisting, 10)));
+  });
+  preview.querySelectorAll("[data-tag-pending]").forEach(btn => {
+    btn.addEventListener("click", () => openTagEditor("pending", parseInt(btn.dataset.tagPending, 10)));
+  });
+}
+
+// ============================================================
+// PHOTO PEOPLE-TAGGING
+// ============================================================
+
+function getTaggingPhotoData() {
+  if (!taggingPhotoRef) return null;
+  if (taggingPhotoRef.source === "existing") {
+    return editingPhotos[taggingPhotoRef.index];
+  }
+  return pendingPhotoMeta[taggingPhotoRef.index];
+}
+
+function openTagEditor(source, index) {
+  taggingPhotoRef = { source, index };
+  const photoData = getTaggingPhotoData();
+  if (!photoData.people) photoData.people = [];
+
+  const img = document.getElementById("tagEditorImg");
+  img.src = source === "existing" ? editingPhotos[index].url : URL.createObjectURL(pendingPhotos[index]);
+  document.getElementById("tagEditorLocation").value = photoData.location || "";
+
+  renderTagEditorPins();
+  document.getElementById("tagEditorOverlay").classList.add("open");
+}
+
+function closeTagEditor() {
+  // Persist whatever location text is currently in the field.
+  const photoData = getTaggingPhotoData();
+  if (photoData) photoData.location = document.getElementById("tagEditorLocation").value.trim();
+  taggingPhotoRef = null;
+  document.getElementById("tagEditorOverlay").classList.remove("open");
+  removeTagMiniForm();
+}
+
+function renderTagEditorPins() {
+  const layer = document.getElementById("tagEditorLayer");
+  const photoData = getTaggingPhotoData();
+  layer.className = "tag-layer editable";
+  layer.innerHTML = "";
+
+  (photoData.people || []).forEach((person, i) => {
+    const pin = document.createElement("div");
+    pin.className = "photo-tag-pin";
+    pin.style.left = person.x + "%";
+    pin.style.top = person.y + "%";
+    pin.innerHTML = `<span class="photo-tag-dot"></span><span class="photo-tag-label">${escapeHtml(person.name)}${person.relationship ? `<span class="relationship">${escapeHtml(person.relationship)}</span>` : ""}</span>`;
+    pin.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showTagMiniForm(person.x, person.y, i);
+    });
+    layer.appendChild(pin);
+  });
+
+  // Tapping empty space on the photo starts a new pin.
+  layer.onclick = (e) => {
+    if (e.target !== layer) return; // ignore taps that landed on an existing pin
+    const rect = layer.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    showTagMiniForm(x, y, null);
+  };
+}
+
+function removeTagMiniForm() {
+  const existing = document.getElementById("tagMiniForm");
+  if (existing) existing.remove();
+}
+
+function showTagMiniForm(x, y, personIndex) {
+  removeTagMiniForm();
+  const photoData = getTaggingPhotoData();
+  const isEditing = personIndex !== null;
+  const person = isEditing ? photoData.people[personIndex] : { name: "", relationship: "" };
+
+  const wrap = document.getElementById("tagEditorImgWrap");
+  const form = document.createElement("div");
+  form.className = "tag-mini-form";
+  form.id = "tagMiniForm";
+  form.style.left = x + "%";
+  form.style.top = y + "%";
+  form.innerHTML = `
+    <input type="text" id="miniName" placeholder="Name" value="${escapeHtml(person.name)}">
+    <input type="text" id="miniRelationship" placeholder="Relationship (e.g. Grandmother)" value="${escapeHtml(person.relationship)}">
+    <div class="tag-mini-form-actions">
+      ${isEditing ? `<button type="button" class="tag-mini-delete" id="miniDeleteBtn">Delete</button>` : `<button type="button" class="tag-mini-cancel" id="miniCancelBtn">Cancel</button>`}
+      <button type="button" class="tag-mini-save" id="miniSaveBtn">Save</button>
+    </div>
+  `;
+  wrap.appendChild(form);
+  document.getElementById("miniName").focus();
+
+  document.getElementById("miniSaveBtn").addEventListener("click", () => {
+    const name = document.getElementById("miniName").value.trim();
+    const relationship = document.getElementById("miniRelationship").value.trim();
+    if (!name) { showToast("Enter a name first"); return; }
+    if (isEditing) {
+      photoData.people[personIndex] = { name, relationship, x, y };
+    } else {
+      photoData.people.push({ name, relationship, x, y });
+    }
+    renderTagEditorPins();
+  });
+  const cancelBtn = document.getElementById("miniCancelBtn");
+  if (cancelBtn) cancelBtn.addEventListener("click", removeTagMiniForm);
+  const deleteBtn = document.getElementById("miniDeleteBtn");
+  if (deleteBtn) deleteBtn.addEventListener("click", () => {
+    photoData.people.splice(personIndex, 1);
+    renderTagEditorPins();
   });
 }
 
@@ -1210,7 +1408,11 @@ async function saveEntry() {
     const selectedTags = Array.from(document.querySelectorAll("#tagChips .chip.selected")).map(c => c.dataset.tag);
 
     const date = document.getElementById("fDate").value;
-    const data = { category: selectedType, kids: selectedKids, tags: selectedTags, date, updatedAt: serverTimestamp() };
+    const data = {
+      category: selectedType, kids: selectedKids, tags: selectedTags,
+      isPrivate: selectedTags.includes("private"), // real field the view-mode query filters on
+      date, updatedAt: serverTimestamp()
+    };
 
     switch (selectedType) {
       case "birth":
@@ -1262,10 +1464,16 @@ async function saveEntry() {
     }
 
     // Photos: combine whatever's left in editingPhotos (after any removals)
-    // with newly uploaded ones. Only applies to forms that had a photo picker.
+    // with newly uploaded ones (carrying over their tagged people/location).
+    // Only applies to forms that had a photo picker.
     if (document.getElementById("fPhotos")) {
       const uploaded = pendingPhotos.length > 0 ? await uploadPhotos(pendingPhotos) : [];
-      data.photos = [...editingPhotos, ...uploaded];
+      const uploadedWithMeta = uploaded.map((photo, i) => ({
+        ...photo,
+        location: (pendingPhotoMeta[i] && pendingPhotoMeta[i].location) || "",
+        people: (pendingPhotoMeta[i] && pendingPhotoMeta[i].people) || []
+      }));
+      data.photos = [...editingPhotos, ...uploadedWithMeta];
     }
 
     if (editingEntryId) {
@@ -1523,6 +1731,23 @@ function bindGlobalEvents() {
   document.getElementById("lightboxNext").addEventListener("click", () => {
     lightboxIdx = (lightboxIdx + 1) % lightboxPhotos.length;
     updateLightbox();
+  });
+
+  document.getElementById("tagEditorClose").addEventListener("click", closeTagEditor);
+  document.getElementById("tagEditorDoneBtn").addEventListener("click", closeTagEditor);
+  document.getElementById("tagEditorOverlay").addEventListener("click", (e) => {
+    if (e.target.id === "tagEditorOverlay") closeTagEditor();
+  });
+
+  const tagToggleBtn = document.getElementById("tagToggleBtn");
+  const tagsHidden = localStorage.getItem("masonsbook_tags_hidden") === "true";
+  document.body.classList.toggle("tags-hidden", tagsHidden);
+  tagToggleBtn.textContent = tagsHidden ? "🚫" : "🏷️";
+  tagToggleBtn.addEventListener("click", () => {
+    const nowHidden = !document.body.classList.contains("tags-hidden");
+    document.body.classList.toggle("tags-hidden", nowHidden);
+    localStorage.setItem("masonsbook_tags_hidden", nowHidden ? "true" : "false");
+    tagToggleBtn.textContent = nowHidden ? "🚫" : "🏷️";
   });
 }
 
