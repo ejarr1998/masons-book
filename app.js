@@ -1259,12 +1259,27 @@ function addBumpWeekRow(week, date, existingPhoto) {
 
   const fileInput = row.querySelector(".bumpRowFileInput");
   const previewImg = row.querySelector(".bumpRowPreviewImg");
+  const photoSlot = row.querySelector(".bump-week-photo-slot");
   fileInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
     rowData.pendingFile = file;
-    previewImg.src = URL.createObjectURL(file);
-    previewImg.style.display = "block";
+    photoSlot.classList.remove("photo-selected-no-preview");
+    previewImg.onerror = () => {
+      // Fallback for anything that still can't render (rare, once HEIC is
+      // handled) — the photo itself is still fine and will upload normally.
+      previewImg.style.display = "none";
+      photoSlot.classList.add("photo-selected-no-preview");
+    };
+    if (isHeicFile(file)) {
+      convertHeicIfNeeded(file).then(converted => {
+        previewImg.src = URL.createObjectURL(converted);
+        previewImg.style.display = "block";
+      });
+    } else {
+      previewImg.src = URL.createObjectURL(file);
+      previewImg.style.display = "block";
+    }
   });
 
   row.querySelector(".bump-week-remove").addEventListener("click", () => {
@@ -1391,13 +1406,24 @@ function renderPhotoPreview() {
   });
   pendingPhotos.forEach((file, i) => {
     if (!pendingPhotoMeta[i]) pendingPhotoMeta[i] = { location: "", people: [] };
-    const url = URL.createObjectURL(file);
     preview.innerHTML += `
       <div class="photo-thumb">
-        <img src="${url}">
+        <img id="pendingPreviewImg${i}" src="" alt="">
         <button type="button" class="photo-thumb-remove" data-remove-pending="${i}" title="Remove photo">×</button>
         <button type="button" class="photo-thumb-tag-btn" data-tag-pending="${i}" title="Tag people">🏷️</button>
       </div>`;
+  });
+  // Set preview sources after the elements exist — HEIC files (common when a
+  // photo's been shared from an iPhone) need async conversion first, since
+  // the browser can't render them directly even as a preview.
+  pendingPhotos.forEach((file, i) => {
+    const imgEl = document.getElementById(`pendingPreviewImg${i}`);
+    if (!imgEl) return;
+    if (isHeicFile(file)) {
+      convertHeicIfNeeded(file).then(converted => { imgEl.src = URL.createObjectURL(converted); });
+    } else {
+      imgEl.src = URL.createObjectURL(file);
+    }
   });
 
   preview.querySelectorAll("[data-remove-existing]").forEach(btn => {
@@ -1731,9 +1757,34 @@ function getVal(id) {
   return el ? el.value : "";
 }
 
+function isHeicFile(file) {
+  const type = (file.type || "").toLowerCase();
+  const name = (file.name || "").toLowerCase();
+  // Many Android browsers don't set file.type correctly for HEIC files
+  // picked via the native picker, so the filename extension is checked too.
+  return type.includes("heic") || type.includes("heif") || name.endsWith(".heic") || name.endsWith(".heif");
+}
+
+async function convertHeicIfNeeded(file) {
+  if (!isHeicFile(file)) return file;
+  if (typeof heic2any !== "function") {
+    console.warn("heic2any not loaded — uploading HEIC file as-is, it may not display correctly.");
+    return file;
+  }
+  try {
+    const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
+    // heic2any resolves to a single Blob, or an array of Blobs for multi-image HEIC files (e.g. Live Photos) — use the first.
+    return Array.isArray(converted) ? converted[0] : converted;
+  } catch (err) {
+    console.warn("HEIC conversion failed, uploading original file:", err);
+    return file;
+  }
+}
+
 async function uploadPhotos(files) {
   const results = [];
-  for (const file of files) {
+  for (const rawFile of files) {
+    const file = await convertHeicIfNeeded(rawFile);
     const compressed = await compressImage(file);
     const filename = `entries/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
     const storageRef = ref(storage, filename);
@@ -1745,11 +1796,15 @@ async function uploadPhotos(files) {
 }
 
 function compressImage(file, maxDim = 1600, quality = 0.82) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    // Best-effort compression: if the browser can't decode this file (this
+    // happens with some HEIC photos from iPhones when opened on Android,
+    // for example), fall back to uploading the original file rather than
+    // failing the whole save. A slightly bigger upload beats a lost photo.
     const img = new Image();
     const reader = new FileReader();
     reader.onload = (e) => { img.src = e.target.result; };
-    reader.onerror = reject;
+    reader.onerror = () => resolve(file);
     img.onload = () => {
       let { width, height } = img;
       if (width > height && width > maxDim) { height *= maxDim / width; width = maxDim; }
@@ -1757,9 +1812,9 @@ function compressImage(file, maxDim = 1600, quality = 0.82) {
       const canvas = document.createElement("canvas");
       canvas.width = width; canvas.height = height;
       canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-      canvas.toBlob(blob => resolve(blob), "image/jpeg", quality);
+      canvas.toBlob(blob => resolve(blob || file), "image/jpeg", quality);
     };
-    img.onerror = reject;
+    img.onerror = () => resolve(file);
     reader.readAsDataURL(file);
   });
 }
