@@ -60,7 +60,8 @@ const PREGNANCY_SUBTYPES = {
   update:  { label: "Update",  emoji: "📝" },
   craving: { label: "Craving", emoji: "🍽️" },
   symptom: { label: "Symptom", emoji: "💭" },
-  scan:    { label: "Scan",    emoji: "🩻" }
+  scan:    { label: "Scan",    emoji: "🩻" },
+  bump:    { label: "Bump Progression", emoji: "📈" }
 };
 
 // ---- State ----
@@ -79,6 +80,7 @@ let editingEntryId = null; // if set, add sheet is in "edit existing" mode
 let editingPhotos = []; // existing photos on the entry currently being added/edited (removable)
 let removedPhotoPaths = []; // storage paths to actually delete once the save succeeds
 let pendingPhotoMeta = []; // {location, people} kept index-aligned with pendingPhotos
+let bumpWeekRows = []; // [{week, date, existingPhoto, pendingFile}] for the Bump Progression pregnancy sub-type
 let taggingPhotoRef = null; // { source: 'existing'|'pending', index } — which photo the tag editor is open on
 let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid, shared via Firestore
 
@@ -606,6 +608,18 @@ function renderCard(e) {
                 <ul class="craving-bullets">
                   ${e.cravings.map(c => `<li>${escapeHtml(c)}</li>`).join("")}
                 </ul>`;
+      } else if (e.subtype === "bump" && e.weeks && e.weeks.length) {
+        const sortedWeeks = [...e.weeks].sort((a, b) => a.week - b.week);
+        const latest = sortedWeeks[sortedWeeks.length - 1];
+        body = `<div class="card-title">Bump Progression</div>
+                <div class="bump-progress-sub">${sortedWeeks.length} update${sortedWeeks.length === 1 ? "" : "s"} so far · latest: week ${latest.week}</div>
+                <div class="bump-strip">
+                  ${sortedWeeks.map((w, i) => `
+                    <div class="bump-week-thumb" data-bump-entry="${e.id}" data-bump-idx="${i}">
+                      <img src="${w.photo.url}">
+                      <span class="bump-week-badge">Wk ${w.week}</span>
+                    </div>`).join("")}
+                </div>`;
       } else {
         body = `<div class="card-title">${escapeHtml(e.title || "Pregnancy update")}</div>
                 ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
@@ -669,6 +683,16 @@ function bindCardEvents(filtered) {
       const idx = parseInt(img.dataset.idx, 10);
       const entry = filtered.find(e => e.id === entryId);
       openLightbox(entry.photos, idx, entry.caption || "");
+    });
+  });
+  document.querySelectorAll("[data-bump-entry]").forEach(thumb => {
+    thumb.addEventListener("click", () => {
+      const entryId = thumb.dataset.bumpEntry;
+      const idx = parseInt(thumb.dataset.bumpIdx, 10);
+      const entry = filtered.find(e => e.id === entryId);
+      const sortedWeeks = [...entry.weeks].sort((a, b) => a.week - b.week);
+      const photosWithCaptions = sortedWeeks.map(w => ({ ...w.photo, caption: `Week ${w.week}` }));
+      openLightbox(photosWithCaptions, idx, "");
     });
   });
   if (isEditMode) {
@@ -1148,6 +1172,21 @@ function renderPregnancyFields(subtype, existing) {
       const rows = document.querySelectorAll("#cravingList .craving-row");
       rows[rows.length - 1].querySelector("input").focus();
     });
+  } else if (subtype === "bump") {
+    container.innerHTML = `
+      <div id="bumpWeeksList" class="bump-weeks-editor"></div>
+      <button type="button" class="collapse-toggle" id="addBumpWeekBtn">+ Add another week</button>
+    `;
+    bumpWeekRows = [];
+    const seed = (sameSubtypeAsExisting && existing.weeks) ? existing.weeks : [];
+    if (seed.length) {
+      seed.forEach(w => addBumpWeekRow(w.week, w.date, w.photo));
+    } else {
+      addBumpWeekRow("", document.getElementById("fDate") ? document.getElementById("fDate").value : "", null);
+    }
+    document.getElementById("addBumpWeekBtn").addEventListener("click", () => {
+      addBumpWeekRow("", "", null);
+    });
   } else {
     const title = sameSubtypeAsExisting ? (existing.title || "") : "";
     const caption = sameSubtypeAsExisting ? (existing.caption || "") : "";
@@ -1189,6 +1228,77 @@ function addCravingRow(text) {
 function collectCravings() {
   const rows = document.querySelectorAll("#cravingList .craving-row input");
   return Array.from(rows).map(i => i.value.trim()).filter(Boolean);
+}
+
+function addBumpWeekRow(week, date, existingPhoto) {
+  const container = document.getElementById("bumpWeeksList");
+  const rowData = { week: week || "", date: date || "", existingPhoto: existingPhoto || null, pendingFile: null };
+  bumpWeekRows.push(rowData);
+  const rowIndex = bumpWeekRows.length - 1;
+
+  const row = document.createElement("div");
+  row.className = "bump-week-row";
+  row.dataset.rowIndex = rowIndex;
+  row.innerHTML = `
+    <div class="bump-week-photo-slot">
+      <img class="bumpRowPreviewImg" src="${existingPhoto ? existingPhoto.url : ''}" style="${existingPhoto ? '' : 'display:none;'}">
+      <label class="bump-week-photo-btn">
+        📷
+        <input type="file" accept="image/*" class="bumpRowFileInput" style="display:none;">
+      </label>
+    </div>
+    <div class="bump-week-fields">
+      <div class="field-row">
+        <div class="field"><label>Week</label><input type="number" min="1" max="42" class="bumpRowWeek" placeholder="e.g. 20" value="${escapeHtml(String(week || ""))}"></div>
+        <div class="field"><label>Date</label><input type="date" class="bumpRowDate" value="${escapeHtml(date || "")}"></div>
+      </div>
+    </div>
+    <button type="button" class="quote-line-remove bump-week-remove" title="Remove">×</button>
+  `;
+  container.appendChild(row);
+
+  const fileInput = row.querySelector(".bumpRowFileInput");
+  const previewImg = row.querySelector(".bumpRowPreviewImg");
+  fileInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    rowData.pendingFile = file;
+    previewImg.src = URL.createObjectURL(file);
+    previewImg.style.display = "block";
+  });
+
+  row.querySelector(".bump-week-remove").addEventListener("click", () => {
+    if (container.querySelectorAll(".bump-week-row").length > 1) {
+      row.remove();
+      bumpWeekRows[rowIndex] = null; // keep indices stable; filtered out on collect
+    } else {
+      row.querySelector(".bumpRowWeek").value = "";
+      row.querySelector(".bumpRowDate").value = "";
+      rowData.week = ""; rowData.date = ""; rowData.existingPhoto = null; rowData.pendingFile = null;
+      previewImg.style.display = "none";
+    }
+  });
+}
+
+async function collectBumpWeeks() {
+  const rows = document.querySelectorAll("#bumpWeeksList .bump-week-row");
+  const results = [];
+  for (const row of rows) {
+    const idx = parseInt(row.dataset.rowIndex, 10);
+    const rowData = bumpWeekRows[idx];
+    if (!rowData) continue;
+    const week = row.querySelector(".bumpRowWeek").value.trim();
+    const date = row.querySelector(".bumpRowDate").value;
+    if (!week) continue; // skip incomplete rows rather than fail the whole save
+    let photo = rowData.existingPhoto;
+    if (rowData.pendingFile) {
+      const uploaded = await uploadPhotos([rowData.pendingFile]);
+      photo = uploaded[0];
+    }
+    if (!photo) continue; // no photo yet for this week — skip until one's added
+    results.push({ week: parseInt(week, 10), date, photo });
+  }
+  return results.sort((a, b) => a.week - b.week);
 }
 
 let lastFocusedSpeakerRow = null;
@@ -1562,6 +1672,8 @@ async function saveEntry() {
         data.subtype = subtype;
         if (subtype === "craving") {
           data.cravings = collectCravings();
+        } else if (subtype === "bump") {
+          data.weeks = await collectBumpWeeks();
         } else {
           data.title = getVal("fTitle");
           data.caption = getVal("fCaption");
