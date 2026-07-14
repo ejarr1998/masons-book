@@ -22,6 +22,7 @@
       <div class="header-sub" id="headerSub">Family Feed</div>
     </div>
     <div style="display:flex; align-items:center; gap:8px;">
+      <button class="icon-btn" id="tagToggleBtn" style="position:static; background:var(--parchment-2);" title="Show/hide photo tags">🏷️</button>
       <button class="icon-btn" id="manageKidsBtn" style="display:none; position:static; background:var(--parchment-2);" title="Manage kids">⚙️</button>
       <div class="mode-badge" id="modeBadge">View mode</div>
     </div>
@@ -68,7 +69,10 @@
 <div class="lightbox-overlay" id="lightbox">
   <button class="lightbox-close" id="lightboxClose">×</button>
   <button class="lightbox-nav prev" id="lightboxPrev">‹</button>
-  <img id="lightboxImg" src="" alt="">
+  <div class="lightbox-img-wrap" id="lightboxImgWrap">
+    <img id="lightboxImg" src="" alt="">
+    <div class="tag-layer" id="lightboxTagLayer"></div>
+  </div>
   <button class="lightbox-nav next" id="lightboxNext">›</button>
   <div class="lightbox-caption" id="lightboxCaption"></div>
   <div class="lightbox-actions">
@@ -76,7 +80,25 @@
   </div>
 </div>
 
+<!-- PHOTO TAG EDITOR -->
+<div class="lightbox-overlay" id="tagEditorOverlay">
+  <button class="lightbox-close" id="tagEditorClose">×</button>
+  <div class="tag-editor-panel">
+    <div class="tag-editor-hint" id="tagEditorHint">Tap anywhere on the photo to tag someone</div>
+    <div class="lightbox-img-wrap" id="tagEditorImgWrap">
+      <img id="tagEditorImg" src="" alt="">
+      <div class="tag-layer" id="tagEditorLayer"></div>
+    </div>
+    <div class="field" style="margin-top:14px;">
+      <label>📍 Location (optional)</label>
+      <input type="text" id="tagEditorLocation" placeholder="e.g. Grandma's House">
+    </div>
+    <button class="btn-primary" id="tagEditorDoneBtn">Done</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
+
 
 <script type="module" src="app.js"></script>
 </body>
