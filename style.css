@@ -449,10 +449,10 @@ input, textarea, select{ font-family: inherit; }
 /* Photo people-tagging: pins, location pill, tag editor */
 .lightbox-img-wrap, .tag-editor-panel .lightbox-img-wrap{ position:relative; display:inline-block; line-height:0; }
 .tag-layer{ position:absolute; inset:0; pointer-events:none; }
-.tag-layer.editable{ pointer-events:auto; cursor:crosshair; }
+.tag-layer.editable{ pointer-events:auto; cursor:pointer; }
 .photo-tag-pin{
   position:absolute; transform: translate(-50%, -50%); display:flex; align-items:center; gap:5px;
-  pointer-events:auto; cursor:pointer;
+  pointer-events:auto; cursor:pointer; touch-action:none; -webkit-user-select:none; user-select:none;
 }
 .photo-tag-dot{
   width:10px; height:10px; border-radius:50%; background: var(--rust); border:2px solid #fff;
