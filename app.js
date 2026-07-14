@@ -514,10 +514,10 @@ function renderCard(e) {
 
   let photosHtml = "";
   if (e.photos && e.photos.length === 1) {
-    photosHtml = `<div class="photo-hero"><img src="${e.photos[0].url}" data-lightbox="${e.id}" data-idx="0" alt=""></div>`;
+    photosHtml = `<div class="photo-hero" data-lightbox="${e.id}" data-idx="0"><img src="${e.photos[0].url}" alt=""></div>`;
   } else if (e.photos && e.photos.length > 1) {
     photosHtml = `<div class="photo-strip">${e.photos.map((p, i) =>
-      `<img src="${p.url}" data-lightbox="${e.id}" data-idx="${i}" alt="">`
+      `<div class="photo-strip-thumb" data-lightbox="${e.id}" data-idx="${i}"><img src="${p.url}" alt=""></div>`
     ).join("")}</div>`;
   }
 
