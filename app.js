@@ -182,7 +182,7 @@ function enterEditMode() {
   isEditMode = true;
   document.getElementById("modeBadge").textContent = "Edit mode";
   document.getElementById("modeBadge").classList.add("edit");
-  document.getElementById("fab").style.display = "flex";
+  document.getElementById("fabAddMini").style.display = "flex";
   document.getElementById("manageKidsBtn").style.display = "flex";
   signInAnonymously(auth)
     .then(() => {
@@ -277,10 +277,15 @@ function getEntryYears() {
 }
 
 function updateFiltersButtonBadge() {
-  const btn = document.getElementById("filtersTriggerBtn");
-  if (!btn) return;
+  const badge = document.getElementById("fabBadge");
+  if (!badge) return;
   const activeCount = [activeKidFilter !== "all", activeCategoryFilter !== "all", activeYearFilter !== "all", activeTagFilters.length > 0].filter(Boolean).length;
-  btn.innerHTML = `Filters${activeCount > 0 ? ` <span class="filters-badge">${activeCount}</span>` : ""}`;
+  if (activeCount > 0) {
+    badge.textContent = activeCount;
+    badge.style.display = "flex";
+  } else {
+    badge.style.display = "none";
+  }
 }
 
 function openFiltersSheet() {
@@ -2007,10 +2012,36 @@ async function saveNewKid() {
   }
 }
 
+function closeFabCluster() {
+  document.getElementById("fabCluster").classList.remove("open");
+}
+
 function bindGlobalEvents() {
-  document.getElementById("fab").addEventListener("click", openAddSheet);
+  document.getElementById("fab").addEventListener("click", () => {
+    // Viewers (not in edit mode) only ever have one option — Filters — so
+    // skip the menu entirely and jump straight there. The speed-dial menu
+    // only makes sense once there's a second option (Add Entry) to choose from.
+    if (!isEditMode) {
+      openFiltersSheet();
+      return;
+    }
+    document.getElementById("fabCluster").classList.toggle("open");
+  });
+  document.getElementById("fabFilterMini").addEventListener("click", () => {
+    closeFabCluster();
+    openFiltersSheet();
+  });
+  document.getElementById("fabAddMini").addEventListener("click", () => {
+    closeFabCluster();
+    openAddSheet();
+  });
+  document.addEventListener("click", (e) => {
+    const cluster = document.getElementById("fabCluster");
+    if (cluster.classList.contains("open") && !cluster.contains(e.target)) {
+      closeFabCluster();
+    }
+  });
   document.getElementById("manageKidsBtn").addEventListener("click", openManageKidsSheet);
-  document.getElementById("filtersTriggerBtn").addEventListener("click", openFiltersSheet);
   document.getElementById("addSheetOverlay").addEventListener("click", (e) => {
     if (e.target.id === "addSheetOverlay") closeAddSheet();
   });
