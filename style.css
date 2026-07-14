@@ -428,6 +428,11 @@ input, textarea, select{ font-family: inherit; }
   background: var(--forest); color:#fff; display:flex; align-items:center; justify-content:center;
   font-size:11px; cursor:pointer; border:2px solid var(--white);
 }
+.photo-selected-no-preview::after{
+  content:"✓ Photo selected"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  text-align:center; font-size:9px; font-weight:700; color: var(--forest); padding:4px;
+  background: var(--parchment-2); border-radius:10px; line-height:1.2;
+}
 .bump-week-fields{ flex:1; min-width:0; }
 .bump-week-fields .field{ margin-bottom:0; }
 .bump-week-fields .field-row{ gap:8px; }
