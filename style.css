@@ -396,13 +396,14 @@ input, textarea, select{ font-family: inherit; }
   padding: 4px 0; cursor:pointer; margin-bottom: 8px;
 }
 
-.photo-input-preview{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.photo-input-preview{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; margin-bottom:16px; }
 .photo-thumb{ position:relative; width:64px; height:64px; }
 .photo-thumb img{ width:64px; height:64px; object-fit:cover; border-radius:10px; display:block; }
 .photo-thumb-remove{
   position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%;
   background: var(--danger); color:#fff; border:2px solid var(--parchment);
   font-size:13px; line-height:1; display:flex; align-items:center; justify-content:center; cursor:pointer;
+  z-index:3;
 }
 
 .btn-primary{
@@ -527,6 +528,7 @@ input, textarea, select{ font-family: inherit; }
   position:absolute; bottom:-6px; left:-6px; width:22px; height:22px; border-radius:50%;
   background: var(--forest); color:#fff; border:2px solid var(--parchment); font-size:11px;
   display:flex; align-items:center; justify-content:center; cursor:pointer;
+  z-index:3;
 }
 
 .toast{
