@@ -514,7 +514,7 @@ function renderCard(e) {
 
   let photosHtml = "";
   if (e.photos && e.photos.length === 1) {
-    photosHtml = `<div class="photo-hero"><img src="${e.photos[0].url}" data-lightbox="${e.id}" data-idx="0" alt="">${renderTagOverlay(e.photos[0])}</div>`;
+    photosHtml = `<div class="photo-hero"><img src="${e.photos[0].url}" data-lightbox="${e.id}" data-idx="0" alt=""></div>`;
   } else if (e.photos && e.photos.length > 1) {
     photosHtml = `<div class="photo-strip">${e.photos.map((p, i) =>
       `<img src="${p.url}" data-lightbox="${e.id}" data-idx="${i}" alt="">`
@@ -662,18 +662,24 @@ function bindCardEvents(filtered) {
 let lightboxPhotos = [];
 let lightboxIdx = 0;
 let lightboxCaption = "";
+let lightboxTagsVisible = false;
 
 function openLightbox(photos, idx, caption) {
   lightboxPhotos = photos;
   lightboxIdx = idx;
   lightboxCaption = caption;
+  lightboxTagsVisible = false; // always start hidden — deliberate tap required to reveal
   updateLightbox();
   document.getElementById("lightbox").classList.add("open");
 }
 function updateLightbox() {
   const photo = lightboxPhotos[lightboxIdx];
   document.getElementById("lightboxImg").src = photo.url;
-  document.getElementById("lightboxTagLayer").innerHTML = renderTagOverlay(photo);
+  document.getElementById("lightboxTagLayer").innerHTML = lightboxTagsVisible ? renderTagOverlay(photo) : "";
+  const hasTags = (photo.people && photo.people.length > 0) || photo.location;
+  const tagsBtn = document.getElementById("lightboxTagsBtn");
+  tagsBtn.style.display = hasTags ? "flex" : "none";
+  tagsBtn.textContent = lightboxTagsVisible ? "🏷️ Hide tags" : "🏷️ Show tags";
   const cap = photo.caption || lightboxCaption || "";
   document.getElementById("lightboxCaption").textContent = cap;
   const showNav = lightboxPhotos.length > 1;
@@ -1310,6 +1316,7 @@ function closeTagEditor() {
 }
 
 function renderTagEditorPins() {
+  removeTagMiniForm(); // clean up any leftover popup before redrawing, or it can linger and block clicks
   const layer = document.getElementById("tagEditorLayer");
   const photoData = getTaggingPhotoData();
   layer.className = "tag-layer editable";
@@ -1739,15 +1746,9 @@ function bindGlobalEvents() {
     if (e.target.id === "tagEditorOverlay") closeTagEditor();
   });
 
-  const tagToggleBtn = document.getElementById("tagToggleBtn");
-  const tagsHidden = localStorage.getItem("masonsbook_tags_hidden") === "true";
-  document.body.classList.toggle("tags-hidden", tagsHidden);
-  tagToggleBtn.textContent = tagsHidden ? "🚫" : "🏷️";
-  tagToggleBtn.addEventListener("click", () => {
-    const nowHidden = !document.body.classList.contains("tags-hidden");
-    document.body.classList.toggle("tags-hidden", nowHidden);
-    localStorage.setItem("masonsbook_tags_hidden", nowHidden ? "true" : "false");
-    tagToggleBtn.textContent = nowHidden ? "🚫" : "🏷️";
+  document.getElementById("lightboxTagsBtn").addEventListener("click", () => {
+    lightboxTagsVisible = !lightboxTagsVisible;
+    updateLightbox();
   });
 }
 
