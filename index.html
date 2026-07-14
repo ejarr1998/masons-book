@@ -27,18 +27,20 @@
     </div>
   </div>
 
-  <!-- FILTERS (collapsed into one button; opens a sheet with People/Type/Dates) -->
-  <div class="filters-trigger-row">
-    <button class="filters-trigger-btn" id="filtersTriggerBtn">Filters</button>
-  </div>
-
   <!-- FEED -->
   <div class="feed" id="feed">
     <div class="loading-msg">Loading moments…</div>
   </div>
 
-  <!-- FAB (edit mode only) -->
-  <button class="fab" id="fab" style="display:none;">+</button>
+  <!-- FAB cluster: tap the + to reveal Filters and Add Entry. Add Entry only shows in edit mode. -->
+  <div class="fab-cluster" id="fabCluster">
+    <button class="fab-mini" id="fabAddMini" title="Add entry" style="display:none;">✏️</button>
+    <button class="fab-mini" id="fabFilterMini" title="Filters">🔍</button>
+    <button class="fab" id="fab" title="Menu">
+      <span class="fab-plus">+</span>
+      <span class="fab-badge" id="fabBadge" style="display:none;"></span>
+    </button>
+  </div>
 
 </div>
 
