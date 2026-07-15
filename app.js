@@ -126,6 +126,7 @@ function init() {
   listenToEntries();
   registerServiceWorker();
   bindGlobalEvents();
+  bindSlideshowEvents();
 }
 
 function listenToTags() {
@@ -600,9 +601,8 @@ let onThisDayPool = [];        // today's month/day matches from past years, rec
 let onThisDayShownIds = new Set(); // ids already surfaced this session, so "Show another" cycles instead of repeating
 let onThisDayCurrentId = null; // the entry currently displayed in the widget
 
-function renderFeed() {
-  const feedEl = document.getElementById("feed");
-  let filtered = entries.filter(e => {
+function getFilteredEntries() {
+  return entries.filter(e => {
     const kidMatch = activeKidFilter === "all" || (e.kids || []).includes(activeKidFilter);
     const catMatch = activeCategoryFilter === "all" || e.category === activeCategoryFilter;
     const entryDate = parseLocalDate(e.date);
@@ -611,6 +611,11 @@ function renderFeed() {
     const tagMatch = activeTagFilters.length === 0 || (e.tags || []).some(t => activeTagFilters.includes(t));
     return kidMatch && catMatch && yearMatch && monthMatch && tagMatch;
   });
+}
+
+function renderFeed() {
+  const feedEl = document.getElementById("feed");
+  let filtered = getFilteredEntries();
 
   // On This Day only makes sense on the all-time view — a specific year/month
   // filter already IS a trip back in time, so the widget would be redundant.
@@ -1000,6 +1005,162 @@ function initThenNowSliders(root) {
       if (e.target.closest(".thennow-handle")) return;
       setPosition(e.clientX);
     });
+  });
+}
+
+// ============================================================
+// SLIDESHOW
+// ============================================================
+
+let slideshowPhotos = [];
+let slideshowSourceEntries = [];
+let slideshowIndex = 0;
+let slideshowTimer = null;
+let slideshowPaused = false;
+let slideshowShuffled = false;
+let slideshowActiveLayer = "a";
+const SLIDESHOW_INTERVAL_MS = 4000;
+
+function collectSlideshowPhotos(sourceEntries) {
+  const photos = [];
+  const sorted = [...sourceEntries].sort((a, b) => parseLocalDate(a.date) - parseLocalDate(b.date));
+  for (const e of sorted) {
+    if (e.photos && e.photos.length) {
+      e.photos.forEach(p => photos.push({ url: p.url, caption: e.caption || e.title || "" }));
+    } else if (e.category === "thennow") {
+      if (e.thenPhoto) photos.push({ url: e.thenPhoto.url, caption: e.thenLabel || "Then" });
+      if (e.nowPhoto) photos.push({ url: e.nowPhoto.url, caption: e.nowLabel || "Now" });
+    } else if (e.category === "pregnancy" && e.subtype === "bump" && e.weeks && e.weeks.length) {
+      [...e.weeks].sort((a, b) => a.week - b.week).forEach(w => {
+        if (w.photo) photos.push({ url: w.photo.url, caption: `Week ${w.week}` });
+      });
+    }
+  }
+  return photos;
+}
+
+function openSlideshow(sourceEntries) {
+  const photos = collectSlideshowPhotos(sourceEntries);
+  if (photos.length === 0) {
+    showToast("No photos to show yet");
+    return;
+  }
+  slideshowSourceEntries = sourceEntries;
+  slideshowPhotos = photos;
+  slideshowIndex = 0;
+  slideshowPaused = false;
+  slideshowShuffled = false;
+  slideshowActiveLayer = "a";
+  document.getElementById("slideshowImgA").classList.remove("active");
+  document.getElementById("slideshowImgB").classList.remove("active");
+  document.getElementById("slideshowShuffleBtn").classList.remove("active");
+  document.getElementById("slideshowPauseBtn").textContent = "⏸";
+
+  document.getElementById("slideshowOverlay").classList.add("open");
+  lockBodyScroll();
+  enterSlideshowFullscreenAndUnlockRotation();
+  renderSlideshowFrame();
+  startSlideshowTimer();
+}
+
+function closeSlideshow() {
+  clearInterval(slideshowTimer);
+  document.getElementById("slideshowOverlay").classList.remove("open");
+  unlockBodyScroll();
+  exitSlideshowFullscreen();
+}
+
+function enterSlideshowFullscreenAndUnlockRotation() {
+  const el = document.getElementById("slideshowOverlay");
+  const req = el.requestFullscreen ? el.requestFullscreen.bind(el) : (el.webkitRequestFullscreen ? el.webkitRequestFullscreen.bind(el) : null);
+  if (!req) return; // Fullscreen API unsupported here — slideshow still plays, just stays portrait-locked
+  req().then(() => {
+    if (screen.orientation && screen.orientation.unlock) {
+      try { screen.orientation.unlock(); } catch (e) { /* non-fatal */ }
+    }
+  }).catch(() => { /* permission denied or blocked — non-fatal */ });
+}
+
+function exitSlideshowFullscreen() {
+  if (document.fullscreenElement) {
+    (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+  }
+}
+
+function renderSlideshowFrame() {
+  const photo = slideshowPhotos[slideshowIndex];
+  const showLayer = slideshowActiveLayer === "a" ? "b" : "a";
+  const imgShow = document.getElementById(`slideshowImg${showLayer.toUpperCase()}`);
+  const imgHide = document.getElementById(`slideshowImg${slideshowActiveLayer.toUpperCase()}`);
+  imgShow.src = photo.url;
+  imgShow.classList.add("active");
+  imgHide.classList.remove("active");
+  slideshowActiveLayer = showLayer;
+
+  document.getElementById("slideshowCaption").textContent = photo.caption || "";
+  document.getElementById("slideshowCounter").textContent = `${slideshowIndex + 1} / ${slideshowPhotos.length}`;
+  const pct = slideshowPhotos.length > 1 ? (slideshowIndex / (slideshowPhotos.length - 1)) * 100 : 100;
+  document.getElementById("slideshowProgressFill").style.width = `${pct}%`;
+}
+
+function slideshowNext() {
+  slideshowIndex = (slideshowIndex + 1) % slideshowPhotos.length;
+  renderSlideshowFrame();
+}
+
+function slideshowPrev() {
+  slideshowIndex = (slideshowIndex - 1 + slideshowPhotos.length) % slideshowPhotos.length;
+  renderSlideshowFrame();
+}
+
+function startSlideshowTimer() {
+  clearInterval(slideshowTimer);
+  if (slideshowPaused) return;
+  slideshowTimer = setInterval(slideshowNext, SLIDESHOW_INTERVAL_MS);
+}
+
+function toggleSlideshowPause() {
+  slideshowPaused = !slideshowPaused;
+  document.getElementById("slideshowPauseBtn").textContent = slideshowPaused ? "▶" : "⏸";
+  startSlideshowTimer();
+}
+
+function toggleSlideshowShuffle() {
+  slideshowShuffled = !slideshowShuffled;
+  document.getElementById("slideshowShuffleBtn").classList.toggle("active", slideshowShuffled);
+  if (slideshowShuffled) {
+    // Shuffle everything except leave the photo on screen right now where it
+    // is, so flipping shuffle on doesn't cause a jarring jump.
+    const current = slideshowPhotos[slideshowIndex];
+    const rest = slideshowPhotos.filter((_, i) => i !== slideshowIndex);
+    for (let i = rest.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+    slideshowPhotos = [current, ...rest];
+    slideshowIndex = 0;
+  } else {
+    slideshowPhotos = collectSlideshowPhotos(slideshowSourceEntries);
+    slideshowIndex = 0;
+    renderSlideshowFrame();
+  }
+  startSlideshowTimer();
+}
+
+function bindSlideshowEvents() {
+  document.getElementById("slideshowBtn").addEventListener("click", () => openSlideshow(getFilteredEntries()));
+  document.getElementById("slideshowClose").addEventListener("click", closeSlideshow);
+  document.getElementById("slideshowPauseBtn").addEventListener("click", toggleSlideshowPause);
+  document.getElementById("slideshowShuffleBtn").addEventListener("click", toggleSlideshowShuffle);
+  document.getElementById("slideshowTapPrev").addEventListener("click", () => { slideshowPrev(); startSlideshowTimer(); });
+  document.getElementById("slideshowTapNext").addEventListener("click", () => { slideshowNext(); startSlideshowTimer(); });
+  document.getElementById("slideshowTapPause").addEventListener("click", toggleSlideshowPause);
+  // Exiting native fullscreen (e.g. via the OS back gesture) should behave
+  // the same as tapping the close button, not leave the overlay stranded.
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && document.getElementById("slideshowOverlay").classList.contains("open")) {
+      closeSlideshow();
+    }
   });
 }
 
@@ -2477,6 +2638,7 @@ function renderTripDetail(tripId) {
       <div class="sheet-title" style="margin-bottom:2px;">🧳 ${escapeHtml(trip ? trip.title : "Trip")}</div>
       ${trip && trip.location ? `<div class="trip-detail-location">📍 ${escapeHtml(trip.location)}</div>` : ""}
       <div class="trip-detail-meta">${dateRangeTxt}${dateRangeTxt ? " · " : ""}${tripEntries.length} moment${tripEntries.length === 1 ? "" : "s"}</div>
+      <button type="button" class="btn-secondary" id="playTripSlideshowBtn" style="width:auto; padding:7px 14px; margin-top:0;">▶ Play this trip</button>
       ${isEditMode ? `
         <div class="trip-detail-actions">
           <button type="button" class="btn-secondary" id="editTripBtn" style="width:auto; padding:7px 14px; margin-top:0;">✎ Edit trip</button>
@@ -2491,6 +2653,7 @@ function renderTripDetail(tripId) {
 
   bindCardEvents(content); // lightbox / bump / thennow / edit / delete all work the same in here
   document.getElementById("closeTripDetailBtn").addEventListener("click", closeAddSheet);
+  document.getElementById("playTripSlideshowBtn").addEventListener("click", () => openSlideshow(tripEntries));
   if (isEditMode) {
     document.getElementById("editTripBtn").addEventListener("click", () => openTripEditForm(tripId));
     document.getElementById("deleteTripBtn").addEventListener("click", () => confirmDeleteTrip(tripId));
