@@ -22,6 +22,7 @@
       <div class="header-sub" id="headerSub">Family Feed</div>
     </div>
     <div style="display:flex; align-items:center; gap:8px;">
+      <button class="icon-btn" id="slideshowBtn" style="position:static; background:var(--parchment-2);" title="Play slideshow">▶️</button>
       <button class="icon-btn" id="manageKidsBtn" style="display:none; position:static; background:var(--parchment-2);" title="Manage kids">⚙️</button>
       <div class="mode-badge" id="modeBadge">View mode</div>
     </div>
@@ -99,6 +100,29 @@
     </div>
     <button class="btn-primary" id="tagEditorDoneBtn">Done</button>
   </div>
+</div>
+
+<!-- SLIDESHOW -->
+<div class="slideshow-overlay" id="slideshowOverlay">
+  <div class="slideshow-top">
+    <div class="slideshow-progress-track"><div class="slideshow-progress-fill" id="slideshowProgressFill"></div></div>
+    <div class="slideshow-top-row">
+      <span class="slideshow-counter" id="slideshowCounter"></span>
+      <div class="slideshow-top-actions">
+        <button class="slideshow-icon-btn" id="slideshowShuffleBtn" title="Shuffle">🔀</button>
+        <button class="slideshow-icon-btn" id="slideshowPauseBtn" title="Pause">⏸</button>
+        <button class="slideshow-icon-btn" id="slideshowClose" title="Close">×</button>
+      </div>
+    </div>
+  </div>
+  <div class="slideshow-stage" id="slideshowStage">
+    <img class="slideshow-img" id="slideshowImgA" alt="">
+    <img class="slideshow-img" id="slideshowImgB" alt="">
+    <div class="slideshow-tap-zone left" id="slideshowTapPrev"></div>
+    <div class="slideshow-tap-zone center" id="slideshowTapPause"></div>
+    <div class="slideshow-tap-zone right" id="slideshowTapNext"></div>
+  </div>
+  <div class="slideshow-caption" id="slideshowCaption"></div>
 </div>
 
 <div class="toast" id="toast"></div>
