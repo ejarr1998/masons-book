@@ -83,6 +83,7 @@ let removedPhotoPaths = []; // storage paths to actually delete once the save su
 let pendingPhotoMeta = []; // {location, people} kept index-aligned with pendingPhotos
 let thenNowPending = { then: null, now: null }; // staged Files for the Then/Now slider, keyed by side
 let thenNowExisting = { then: null, now: null }; // already-uploaded {url, path} photos when editing
+let thenNowFocal = { then: { x: 50, y: 50 }, now: { x: 50, y: 50 } }; // object-position focal point per side, as percentages
 let bumpWeekRows = []; // [{week, date, existingPhoto, pendingFile}] for the Bump Progression pregnancy sub-type
 let taggingPhotoRef = null; // { source: 'existing'|'pending', index } — which photo the tag editor is open on
 let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid, shared via Firestore
@@ -696,12 +697,14 @@ function renderCard(e) {
                 ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
       }
       break;
-    case "thennow":
+    case "thennow": {
+      const tf = e.thenFocal || { x: 50, y: 50 };
+      const nf = e.nowFocal || { x: 50, y: 50 };
       body = `<div class="card-title">${escapeHtml(e.title || "Then vs. Now")}</div>
               <div class="thennow-slider" data-thennow-entry="${e.id}">
-                <img class="thennow-img thennow-now" src="${e.nowPhoto.url}">
+                <img class="thennow-img thennow-now" src="${e.nowPhoto.url}" style="object-position:${nf.x}% ${nf.y}%;">
                 <div class="thennow-clip">
-                  <img class="thennow-img thennow-then" src="${e.thenPhoto.url}">
+                  <img class="thennow-img thennow-then" src="${e.thenPhoto.url}" style="object-position:${tf.x}% ${tf.y}%;">
                 </div>
                 <div class="thennow-handle">
                   <span class="thennow-handle-grip">⇔</span>
@@ -711,6 +714,7 @@ function renderCard(e) {
               </div>
               ${e.caption ? `<p class="card-text">${escapeHtml(e.caption)}</p>` : ""}`;
       break;
+    }
     default: // photo
       body = `${e.caption ? `<p class="photo-caption">${escapeHtml(e.caption)}</p>` : ""}
               ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
@@ -992,6 +996,7 @@ function openAddSheet() {
   removedPhotoPaths = [];
   thenNowPending = { then: null, now: null };
   thenNowExisting = { then: null, now: null };
+  thenNowFocal = { then: { x: 50, y: 50 }, now: { x: 50, y: 50 } };
   renderTypePicker();
   document.getElementById("addSheetOverlay").classList.add("open");
   lockBodyScroll();
@@ -1013,6 +1018,7 @@ function openEditSheet(entryId) {
   removedPhotoPaths = [];
   thenNowPending = { then: null, now: null };
   thenNowExisting = { then: entry.thenPhoto || null, now: entry.nowPhoto || null };
+  thenNowFocal = { then: entry.thenFocal || { x: 50, y: 50 }, now: entry.nowFocal || { x: 50, y: 50 } };
   renderEntryForm(entry);
   document.getElementById("addSheetOverlay").classList.add("open");
   lockBodyScroll();
@@ -1224,21 +1230,24 @@ function renderEntryForm(existing) {
         <div class="thennow-slots">
           <div class="thennow-slot-wrap">
             <div class="thennow-slot-label">Then</div>
-            <div class="bump-week-photo-slot thennow-form-slot" id="thenPhotoSlot">
-              <img class="thennow-form-preview" id="thenPreviewImg" src="${thenNowExisting.then ? thenNowExisting.then.url : ''}" style="${thenNowExisting.then ? '' : 'display:none;'}">
-              <label class="bump-week-photo-btn">
+            <div class="thennow-form-frame" id="thenPhotoFrame">
+              <img class="thennow-form-preview" id="thenPreviewImg" src="${thenNowExisting.then ? thenNowExisting.then.url : ''}" style="${thenNowExisting.then ? '' : 'display:none;'} object-position:${thenNowFocal.then.x}% ${thenNowFocal.then.y}%;">
+              <div class="thennow-form-empty" id="thenPhotoEmpty" style="${thenNowExisting.then ? 'display:none;' : ''}">Tap 📷 to add a photo</div>
+              <div class="thennow-form-hint" id="thenPhotoHint" style="${thenNowExisting.then ? '' : 'display:none;'}">↔ Drag to reposition</div>
+              <label class="thennow-form-change-btn" title="Change photo">
                 📷
                 <input type="file" accept="image/*" id="fThenPhoto" style="display:none;">
               </label>
             </div>
             <input type="text" id="fThenLabel" placeholder="e.g. Newborn" value="${existing ? escapeHtml(existing.thenLabel || "") : ""}">
           </div>
-          <div class="thennow-arrow">→</div>
           <div class="thennow-slot-wrap">
             <div class="thennow-slot-label">Now</div>
-            <div class="bump-week-photo-slot thennow-form-slot" id="nowPhotoSlot">
-              <img class="thennow-form-preview" id="nowPreviewImg" src="${thenNowExisting.now ? thenNowExisting.now.url : ''}" style="${thenNowExisting.now ? '' : 'display:none;'}">
-              <label class="bump-week-photo-btn">
+            <div class="thennow-form-frame" id="nowPhotoFrame">
+              <img class="thennow-form-preview" id="nowPreviewImg" src="${thenNowExisting.now ? thenNowExisting.now.url : ''}" style="${thenNowExisting.now ? '' : 'display:none;'} object-position:${thenNowFocal.now.x}% ${thenNowFocal.now.y}%;">
+              <div class="thennow-form-empty" id="nowPhotoEmpty" style="${thenNowExisting.now ? 'display:none;' : ''}">Tap 📷 to add a photo</div>
+              <div class="thennow-form-hint" id="nowPhotoHint" style="${thenNowExisting.now ? '' : 'display:none;'}">↔ Drag to reposition</div>
+              <label class="thennow-form-change-btn" title="Change photo">
                 📷
                 <input type="file" accept="image/*" id="fNowPhoto" style="display:none;">
               </label>
@@ -1514,30 +1523,76 @@ async function collectBumpWeeks() {
 }
 
 function initThenNowFields() {
-  bindThenNowSlot("then", document.getElementById("fThenPhoto"), document.getElementById("thenPreviewImg"), document.getElementById("thenPhotoSlot"));
-  bindThenNowSlot("now", document.getElementById("fNowPhoto"), document.getElementById("nowPreviewImg"), document.getElementById("nowPhotoSlot"));
+  bindThenNowSlot("then");
+  bindThenNowSlot("now");
 }
 
-function bindThenNowSlot(side, fileInput, previewImg, photoSlot) {
+function bindThenNowSlot(side) {
+  const fileInput = document.getElementById(side === "then" ? "fThenPhoto" : "fNowPhoto");
+  const previewImg = document.getElementById(side === "then" ? "thenPreviewImg" : "nowPreviewImg");
+  const emptyEl = document.getElementById(side === "then" ? "thenPhotoEmpty" : "nowPhotoEmpty");
+  const hintEl = document.getElementById(side === "then" ? "thenPhotoHint" : "nowPhotoHint");
+  const frame = document.getElementById(side === "then" ? "thenPhotoFrame" : "nowPhotoFrame");
+
+  function applyFocal() {
+    const f = thenNowFocal[side];
+    previewImg.style.objectPosition = `${f.x}% ${f.y}%`;
+  }
+
+  function showPhoto(src) {
+    previewImg.src = src;
+    previewImg.style.display = "block";
+    emptyEl.style.display = "none";
+    hintEl.style.display = "block";
+    applyFocal();
+  }
+
   fileInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
     thenNowPending[side] = file;
-    photoSlot.classList.remove("photo-selected-no-preview");
+    thenNowFocal[side] = { x: 50, y: 50 }; // a new photo resets any prior repositioning
     previewImg.onerror = () => {
       previewImg.style.display = "none";
-      photoSlot.classList.add("photo-selected-no-preview");
+      emptyEl.style.display = "block";
+      emptyEl.textContent = "Couldn't load that photo — try another";
     };
     if (isHeicFile(file)) {
-      convertHeicIfNeeded(file).then(converted => {
-        previewImg.src = URL.createObjectURL(converted);
-        previewImg.style.display = "block";
-      });
+      convertHeicIfNeeded(file).then(converted => showPhoto(URL.createObjectURL(converted)));
     } else {
-      previewImg.src = URL.createObjectURL(file);
-      previewImg.style.display = "block";
+      showPhoto(URL.createObjectURL(file));
     }
   });
+
+  // Drag-to-reposition: lets you pick which part of the photo shows through
+  // the crop, since most photos aren't framed with the subject dead-center.
+  let dragging = false;
+  let lastX, lastY;
+  frame.addEventListener("pointerdown", (e) => {
+    if (previewImg.style.display === "none") return; // nothing to reposition yet
+    dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    frame.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  frame.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const rect = frame.getBoundingClientRect();
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    const f = thenNowFocal[side];
+    f.x = Math.max(0, Math.min(100, f.x - (dx / rect.width) * 100));
+    f.y = Math.max(0, Math.min(100, f.y - (dy / rect.height) * 100));
+    applyFocal();
+  });
+  frame.addEventListener("pointerup", (e) => {
+    dragging = false;
+    frame.releasePointerCapture(e.pointerId);
+  });
+  frame.addEventListener("pointercancel", () => { dragging = false; });
 }
 
 let lastFocusedSpeakerRow = null;
@@ -1945,6 +2000,8 @@ async function saveEntry() {
         data.nowLabel = getVal("fNowLabel");
         data.thenPhoto = thenNowPending.then ? (await uploadPhotos([thenNowPending.then]))[0] : thenNowExisting.then;
         data.nowPhoto = thenNowPending.now ? (await uploadPhotos([thenNowPending.now]))[0] : thenNowExisting.now;
+        data.thenFocal = thenNowFocal.then;
+        data.nowFocal = thenNowFocal.now;
         break;
       }
       default: // custom user-created types
