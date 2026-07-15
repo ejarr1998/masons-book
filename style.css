@@ -464,16 +464,33 @@ input, textarea, select{ font-family: inherit; }
 .bump-week-remove{ flex-shrink:0; }
 
 /* Then vs. Now: form editor */
-.thennow-slots{ display:flex; align-items:center; gap:10px; margin: 4px 0 14px; }
-.thennow-slot-wrap{ flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; }
+.thennow-slots{ display:flex; flex-direction:column; gap:16px; margin: 4px 0 14px; }
+.thennow-slot-wrap{ display:flex; flex-direction:column; gap:8px; }
 .thennow-slot-label{ font-size:11.5px; font-weight:700; color: var(--ink-soft); text-transform:uppercase; letter-spacing:0.04em; }
-.thennow-form-slot{ width:100px; height:100px; }
-.thennow-form-preview{ width:100px; height:100px; object-fit:cover; border-radius:10px; display:block; }
+.thennow-form-frame{
+  position:relative; width:100%; aspect-ratio: 4 / 3; border-radius:14px; overflow:hidden;
+  background: var(--parchment-2); border:1px solid var(--taupe); touch-action:none; cursor: grab;
+}
+.thennow-form-frame:active{ cursor: grabbing; }
+.thennow-form-preview{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; pointer-events:none; }
+.thennow-form-empty{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:13px; color: var(--ink-soft); text-align:center; padding: 0 20px; pointer-events:none;
+}
+.thennow-form-hint{
+  position:absolute; top:8px; left:50%; transform:translateX(-50%);
+  background: rgba(20,18,14,0.6); color:#fff; font-size:10.5px; font-weight:600;
+  padding:4px 10px; border-radius:100px; pointer-events:none;
+}
+.thennow-form-change-btn{
+  position:absolute; bottom:8px; right:8px; width:36px; height:36px; border-radius:50%;
+  background: rgba(20,18,14,0.65); color:#fff; display:flex; align-items:center; justify-content:center;
+  font-size:16px; cursor:pointer;
+}
 .thennow-slot-wrap input[type="text"]{
   width:100%; padding: 8px 10px; border-radius:8px; border:1px solid var(--taupe);
   font-size:12.5px; text-align:center; background: var(--white);
 }
-.thennow-arrow{ font-size:20px; color: var(--taupe); flex-shrink:0; margin-top:20px; }
 
 /* Then vs. Now: card display (draggable comparison slider) */
 .thennow-slider{
