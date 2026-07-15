@@ -646,10 +646,14 @@ function renderFeed() {
   const feedEl = document.getElementById("feed");
   let filtered = getFilteredEntries();
 
-  // On This Day only makes sense on the all-time view — a specific year/month
-  // filter already IS a trip back in time, so the widget would be redundant.
+  // On This Day only makes sense on the completely unfiltered view — any
+  // active filter (kid, category, year/month, or tags) means the person is
+  // deliberately looking at a narrowed slice, and resurfacing an unrelated
+  // memory there would feel like a non-sequitur.
   let onThisDayHtml = "";
-  if (activeYearFilter === "all" && activeMonthFilter === "all") {
+  const noFiltersActive = activeKidFilter === "all" && activeCategoryFilter === "all" &&
+    activeYearFilter === "all" && activeMonthFilter === "all" && activeTagFilters.length === 0;
+  if (noFiltersActive) {
     onThisDayPool = computeOnThisDayPool();
     if (onThisDayPool.length > 0) {
       let currentEntry = onThisDayPool.find(e => e.id === onThisDayCurrentId);
@@ -896,7 +900,6 @@ function renderCard(e) {
                 <div class="firstyear-stage">
                   <img class="firstyear-img" id="firstyearImgA-${e.id}" alt="">
                   <img class="firstyear-img" id="firstyearImgB-${e.id}" alt="">
-                  <button type="button" class="firstyear-play-btn" id="firstyearPlay-${e.id}" title="Play">▶</button>
                 </div>
                 <div class="firstyear-caption" id="firstyearCaption-${e.id}"></div>
                 <div class="firstyear-track" id="firstyearTrack-${e.id}">
@@ -1053,8 +1056,6 @@ function initThenNowSliders(root) {
   });
 }
 
-const FIRSTYEAR_PLAY_INTERVAL_MS = 2500;
-
 function initFirstYearScrubbers(root) {
   root.querySelectorAll(".firstyear-scrubber").forEach(scrubber => {
     const entryId = scrubber.dataset.firstyearEntry;
@@ -1066,7 +1067,6 @@ function initFirstYearScrubbers(root) {
     const imgB = document.getElementById(`firstyearImgB-${entryId}`);
     const captionEl = document.getElementById(`firstyearCaption-${entryId}`);
     const track = document.getElementById(`firstyearTrack-${entryId}`);
-    const playBtn = document.getElementById(`firstyearPlay-${entryId}`);
 
     // Ticks for months without a photo yet stay dim and unclickable — only
     // real checkpoints can be landed on.
@@ -1077,8 +1077,6 @@ function initFirstYearScrubbers(root) {
 
     let activeLayer = "a";
     let pos = 0; // index into `months`
-    let playing = false;
-    let playTimer = null;
 
     function showMonth(newPos) {
       pos = newPos;
@@ -1095,23 +1093,6 @@ function initFirstYearScrubbers(root) {
       });
     }
 
-    function stopPlaying() {
-      playing = false;
-      clearInterval(playTimer);
-      playBtn.textContent = "▶";
-    }
-    function startPlaying() {
-      if (months.length < 2) return;
-      playing = true;
-      playBtn.textContent = "⏸";
-      playTimer = setInterval(() => showMonth((pos + 1) % months.length), FIRSTYEAR_PLAY_INTERVAL_MS);
-    }
-
-    playBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      if (playing) stopPlaying(); else startPlaying();
-    });
-
     function snapToClientX(clientX) {
       const rect = track.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
@@ -1123,10 +1104,7 @@ function initFirstYearScrubbers(root) {
         if (d < bestDist) { bestDist = d; best = m; }
       });
       const newPos = months.indexOf(best);
-      if (newPos !== pos) {
-        stopPlaying();
-        showMonth(newPos);
-      }
+      if (newPos !== pos) showMonth(newPos);
     }
 
     let dragging = false;
