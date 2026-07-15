@@ -1064,6 +1064,7 @@ function openSlideshow(sourceEntries) {
   document.getElementById("slideshowShuffleBtn").classList.remove("active");
   document.getElementById("slideshowPauseBtn").textContent = "⏸";
 
+  document.getElementById("slideshowOverlay").classList.remove("minimal");
   document.getElementById("slideshowOverlay").classList.add("open");
   lockBodyScroll();
   enterSlideshowFullscreenAndUnlockRotation();
@@ -1186,6 +1187,10 @@ function toggleSlideshowShuffle() {
 function bindSlideshowEvents() {
   document.getElementById("slideshowBtn").addEventListener("click", () => openSlideshow(getFilteredEntries()));
   document.getElementById("slideshowClose").addEventListener("click", closeSlideshow);
+  document.getElementById("slideshowMinimalClose").addEventListener("click", closeSlideshow);
+  document.getElementById("slideshowMinimalToggle").addEventListener("click", () => {
+    document.getElementById("slideshowOverlay").classList.toggle("minimal");
+  });
   document.getElementById("slideshowPauseBtn").addEventListener("click", toggleSlideshowPause);
   document.getElementById("slideshowShuffleBtn").addEventListener("click", toggleSlideshowShuffle);
   document.getElementById("slideshowTapPrev").addEventListener("click", () => { slideshowPrev(); startSlideshowTimer(); });
