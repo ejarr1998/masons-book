@@ -181,17 +181,23 @@ async function listenToKids() {
 }
 
 function checkEditRoute() {
-  const params = new URLSearchParams(window.location.search);
-  const wantsEdit = params.get("edit") === "1";
-  if (wantsEdit) {
-    const deviceAuthed = localStorage.getItem(DEVICE_AUTH_KEY) === "true";
-    if (deviceAuthed) {
-      enterEditMode();
-    } else {
-      openPinScreen();
-    }
-  }
   bindWordmarkEditTrigger();
+
+  // Once this device has proven it knows the PIN, there's no reason to make
+  // it re-prove that (or hunt for a URL param / tap gesture) on every single
+  // launch — it just stays in edit mode going forward, same as a native app
+  // staying logged in. Only a device that's NEVER been unlocked (e.g. a
+  // family member's view-only phone) falls through to view mode below.
+  const deviceAuthed = localStorage.getItem(DEVICE_AUTH_KEY) === "true";
+  if (deviceAuthed) {
+    enterEditMode();
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("edit") === "1") {
+    openPinScreen();
+  }
 }
 
 // Installed/standalone PWAs hide the address bar, so there's no way to type
