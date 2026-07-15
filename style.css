@@ -546,11 +546,6 @@ input, textarea, select{ font-family: inherit; }
   opacity:0; transition: opacity .5s ease;
 }
 .firstyear-img.active{ opacity:1; }
-.firstyear-play-btn{
-  position:absolute; bottom:10px; right:10px; z-index:2;
-  width:38px; height:38px; border-radius:50%; background:rgba(20,18,14,0.6); color:#fff;
-  border:none; font-size:15px; display:flex; align-items:center; justify-content:center; cursor:pointer;
-}
 .firstyear-caption{
   text-align:center; font-size:15px; font-weight:700; color: var(--forest);
   font-family:'Caveat', cursive; margin-bottom:8px;
