@@ -529,6 +529,47 @@ input, textarea, select{ font-family: inherit; }
 .thennow-tag-left{ left:10px; }
 .thennow-tag-right{ right:10px; }
 
+/* First Year: form rows (13 fixed month slots, reusing the bump photo-slot look) */
+.firstyear-form-rows{ display:flex; flex-direction:column; gap:8px; margin: 4px 0 14px; }
+.firstyear-form-row{ display:flex; align-items:center; gap:12px; }
+.firstyear-form-slot{ width:52px; height:52px; }
+.firstyear-form-row-label{ font-size:13.5px; font-weight:600; color: var(--ink); }
+
+/* First Year: display scrubber — crossfading stage + draggable track of ticks */
+.firstyear-scrubber{ display:flex; flex-direction:column; }
+.firstyear-stage{
+  position:relative; width:100%; aspect-ratio: 4 / 5; background: var(--parchment-2);
+  border-radius:14px; overflow:hidden; margin: 4px 0 10px;
+}
+.firstyear-img{
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+  opacity:0; transition: opacity .5s ease;
+}
+.firstyear-img.active{ opacity:1; }
+.firstyear-play-btn{
+  position:absolute; bottom:10px; right:10px; z-index:2;
+  width:38px; height:38px; border-radius:50%; background:rgba(20,18,14,0.6); color:#fff;
+  border:none; font-size:15px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+}
+.firstyear-caption{
+  text-align:center; font-size:15px; font-weight:700; color: var(--forest);
+  font-family:'Caveat', cursive; margin-bottom:8px;
+}
+.firstyear-track{
+  position:relative; display:flex; align-items:center; justify-content:space-between;
+  height:28px; padding: 0 4px; touch-action:none; cursor:pointer;
+}
+.firstyear-track::before{
+  content:""; position:absolute; left:4px; right:4px; top:50%; height:2px;
+  background: var(--taupe); transform:translateY(-50%);
+}
+.firstyear-tick{
+  position:relative; z-index:1; width:9px; height:9px; border-radius:50%;
+  background: var(--taupe); flex-shrink:0;
+}
+.firstyear-tick.has-photo{ background: var(--rust-soft); }
+.firstyear-tick.current{ background: var(--rust); transform:scale(1.5); }
+
 /* On This Day: resurfaced-memory widget */
 .on-this-day-wrap{
   border-radius:20px; border: 1px dashed var(--rust-soft);
