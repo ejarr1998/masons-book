@@ -1012,9 +1012,11 @@ function initThenNowSliders(root) {
 // SLIDESHOW
 // ============================================================
 
-let slideshowPhotos = [];
+let slideshowPhotos = []; // master list, chronological — never reordered, even in shuffle mode
 let slideshowSourceEntries = [];
-let slideshowIndex = 0;
+let slideshowIndex = 0; // position in slideshowPhotos, used when NOT shuffled
+let slideshowShuffleHistory = []; // sequence of indices actually shown, used when shuffled
+let slideshowHistoryPos = -1; // pointer into slideshowShuffleHistory
 let slideshowTimer = null;
 let slideshowPaused = false;
 let slideshowShuffled = false;
@@ -1039,6 +1041,10 @@ function collectSlideshowPhotos(sourceEntries) {
   return photos;
 }
 
+function currentSlideshowPhotoIndex() {
+  return slideshowShuffled ? slideshowShuffleHistory[slideshowHistoryPos] : slideshowIndex;
+}
+
 function openSlideshow(sourceEntries) {
   const photos = collectSlideshowPhotos(sourceEntries);
   if (photos.length === 0) {
@@ -1048,6 +1054,8 @@ function openSlideshow(sourceEntries) {
   slideshowSourceEntries = sourceEntries;
   slideshowPhotos = photos;
   slideshowIndex = 0;
+  slideshowShuffleHistory = [];
+  slideshowHistoryPos = -1;
   slideshowPaused = false;
   slideshowShuffled = false;
   slideshowActiveLayer = "a";
@@ -1062,6 +1070,8 @@ function openSlideshow(sourceEntries) {
   renderSlideshowFrame();
   startSlideshowTimer();
 }
+
+
 
 function closeSlideshow() {
   clearInterval(slideshowTimer);
@@ -1088,7 +1098,8 @@ function exitSlideshowFullscreen() {
 }
 
 function renderSlideshowFrame() {
-  const photo = slideshowPhotos[slideshowIndex];
+  const idx = currentSlideshowPhotoIndex();
+  const photo = slideshowPhotos[idx];
   const showLayer = slideshowActiveLayer === "a" ? "b" : "a";
   const imgShow = document.getElementById(`slideshowImg${showLayer.toUpperCase()}`);
   const imgHide = document.getElementById(`slideshowImg${slideshowActiveLayer.toUpperCase()}`);
@@ -1098,18 +1109,41 @@ function renderSlideshowFrame() {
   slideshowActiveLayer = showLayer;
 
   document.getElementById("slideshowCaption").textContent = photo.caption || "";
-  document.getElementById("slideshowCounter").textContent = `${slideshowIndex + 1} / ${slideshowPhotos.length}`;
-  const pct = slideshowPhotos.length > 1 ? (slideshowIndex / (slideshowPhotos.length - 1)) * 100 : 100;
+  // In shuffle mode, "position in the original order" isn't meaningful — a
+  // random walk can revisit the deck indefinitely — so the counter/progress
+  // wrap around the deck size instead of trying to represent absolute progress.
+  const posForDisplay = slideshowShuffled ? (slideshowHistoryPos % slideshowPhotos.length) : idx;
+  document.getElementById("slideshowCounter").textContent = `${posForDisplay + 1} / ${slideshowPhotos.length}`;
+  const pct = slideshowPhotos.length > 1 ? (posForDisplay / (slideshowPhotos.length - 1)) * 100 : 100;
   document.getElementById("slideshowProgressFill").style.width = `${pct}%`;
 }
 
 function slideshowNext() {
-  slideshowIndex = (slideshowIndex + 1) % slideshowPhotos.length;
+  if (slideshowShuffled) {
+    if (slideshowHistoryPos < slideshowShuffleHistory.length - 1) {
+      // Stepping forward into a spot we've already visited (because the
+      // person went back earlier) — replay it rather than re-randomizing.
+      slideshowHistoryPos++;
+    } else {
+      let nextIdx = slideshowPhotos.length;
+      do {
+        nextIdx = Math.floor(Math.random() * slideshowPhotos.length);
+      } while (nextIdx === slideshowShuffleHistory[slideshowHistoryPos] && slideshowPhotos.length > 1);
+      slideshowShuffleHistory.push(nextIdx);
+      slideshowHistoryPos++;
+    }
+  } else {
+    slideshowIndex = (slideshowIndex + 1) % slideshowPhotos.length;
+  }
   renderSlideshowFrame();
 }
 
 function slideshowPrev() {
-  slideshowIndex = (slideshowIndex - 1 + slideshowPhotos.length) % slideshowPhotos.length;
+  if (slideshowShuffled) {
+    if (slideshowHistoryPos > 0) slideshowHistoryPos--; // step back through actual shuffle history, no wraparound
+  } else {
+    slideshowIndex = (slideshowIndex - 1 + slideshowPhotos.length) % slideshowPhotos.length;
+  }
   renderSlideshowFrame();
 }
 
@@ -1126,24 +1160,26 @@ function toggleSlideshowPause() {
 }
 
 function toggleSlideshowShuffle() {
+  const currentIdx = currentSlideshowPhotoIndex();
   slideshowShuffled = !slideshowShuffled;
   document.getElementById("slideshowShuffleBtn").classList.toggle("active", slideshowShuffled);
   if (slideshowShuffled) {
-    // Shuffle everything except leave the photo on screen right now where it
-    // is, so flipping shuffle on doesn't cause a jarring jump.
-    const current = slideshowPhotos[slideshowIndex];
-    const rest = slideshowPhotos.filter((_, i) => i !== slideshowIndex);
-    for (let i = rest.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [rest[i], rest[j]] = [rest[j], rest[i]];
+    // Start a fresh random walk, jumping immediately to a new photo so it's
+    // obvious shuffle actually took effect rather than reordering silently.
+    let startIdx = currentIdx;
+    if (slideshowPhotos.length > 1) {
+      do {
+        startIdx = Math.floor(Math.random() * slideshowPhotos.length);
+      } while (startIdx === currentIdx);
     }
-    slideshowPhotos = [current, ...rest];
-    slideshowIndex = 0;
+    slideshowShuffleHistory = [startIdx];
+    slideshowHistoryPos = 0;
   } else {
-    slideshowPhotos = collectSlideshowPhotos(slideshowSourceEntries);
-    slideshowIndex = 0;
-    renderSlideshowFrame();
+    // Drop back into chronological order at wherever this photo actually
+    // sits, so turning shuffle off doesn't itself cause a jump.
+    slideshowIndex = currentIdx;
   }
+  renderSlideshowFrame();
   startSlideshowTimer();
 }
 
