@@ -411,12 +411,28 @@ function tripsSectionBodyHtml() {
   if (TRIPS.length === 0) {
     return `<div style="font-size:13px; color:var(--ink-soft);">No trips yet — create one from the entry form when adding a moment.</div>`;
   }
-  // Tapping a trip here jumps straight into it rather than toggling a filter —
-  // trips are always browsed through their own dedicated view, same as tapping
-  // the trip card in the feed.
-  return `<div class="chip-select">${TRIPS.map(t =>
-    `<div class="chip" data-trip-filter-chip="${t.id}">🧳 ${escapeHtml(t.title)}</div>`
-  ).join("")}</div>`;
+  // TRIPS already arrives sorted most-recent-first from Firestore, so group
+  // consecutively by year rather than re-sorting.
+  const groups = [];
+  let currentYear = null;
+  for (const t of TRIPS) {
+    const d = parseLocalDate(t.startDate);
+    const year = isNaN(d) ? "Unknown date" : d.getFullYear();
+    if (year !== currentYear) {
+      groups.push({ year, trips: [] });
+      currentYear = year;
+    }
+    groups[groups.length - 1].trips.push(t);
+  }
+  return groups.map((g, i) => `
+    <div class="filter-subtle-label" style="margin-top:${i === 0 ? '0' : '14px'};">${g.year}</div>
+    <div class="trip-filter-list">
+      ${g.trips.map(t => `
+        <div class="trip-filter-row" data-trip-filter-chip="${t.id}">
+          <span class="trip-filter-row-title">🧳 ${escapeHtml(t.title)}</span>
+          <span class="trip-filter-row-dates">${escapeHtml(formatTripDateRange(t.startDate, t.endDate))}</span>
+        </div>`).join("")}
+    </div>`).join("");
 }
 
 function renderFiltersSheet() {
