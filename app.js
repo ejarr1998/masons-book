@@ -73,6 +73,7 @@ let activeCategoryFilter = "all";
 let activeYearFilter = "all";
 let activeMonthFilter = "all";
 let TAGS = []; // user-created tags, shared via Firestore, e.g. "Doctor Visit", "Grandma's House"
+let TRIPS = []; // trips, shared via Firestore — a lightweight container that groups entries together
 let activeTagFilters = []; // multi-select: entry matches if it has ANY of these tags
 let expandedFilterSections = { people: false, type: false, dates: false };
 let selectedType = null;
@@ -121,6 +122,7 @@ function init() {
   listenToKids();
   listenToCategoryConfig();
   listenToTags();
+  listenToTrips();
   listenToEntries();
   registerServiceWorker();
   bindGlobalEvents();
@@ -141,6 +143,15 @@ function listenToTags() {
     TAGS = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     renderFeed(); // tag pills on cards depend on TAGS being loaded
   }, (err) => console.error("Tags listen error:", err));
+}
+
+function listenToTrips() {
+  const tripsCol = collection(db, "trips");
+  const q = query(tripsCol, orderBy("startDate", "desc"));
+  onSnapshot(q, (snapshot) => {
+    TRIPS = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderFeed(); // trip cards & the trip picker in the entry form depend on TRIPS
+  }, (err) => console.error("Trips listen error:", err));
 }
 
 function listenToCategoryConfig() {
@@ -552,8 +563,69 @@ function renderFeed() {
     return;
   }
 
-  feedEl.innerHTML = onThisDayHtml + filtered.map(e => renderCard(e)).join("");
+  // Entries that belong to a trip don't render individually — they collapse
+  // into one Trip card (at the position of the trip's most recent matching
+  // entry, since `filtered` is already sorted newest-first).
+  const seenTrips = new Set();
+  const cardsHtml = [];
+  for (const e of filtered) {
+    if (e.tripId) {
+      if (seenTrips.has(e.tripId)) continue;
+      seenTrips.add(e.tripId);
+      cardsHtml.push(renderTripCard(e.tripId));
+    } else {
+      cardsHtml.push(renderCard(e));
+    }
+  }
+
+  feedEl.innerHTML = onThisDayHtml + cardsHtml.join("");
   bindCardEvents(feedEl);
+}
+
+function renderTripCard(tripId) {
+  const trip = TRIPS.find(t => t.id === tripId);
+  const tripEntries = entries.filter(e => e.tripId === tripId);
+  const sorted = [...tripEntries].sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date));
+
+  const collagePhotos = [];
+  for (const e of sorted) {
+    if (collagePhotos.length >= 4) break;
+    let url = null;
+    if (e.photos && e.photos.length) url = e.photos[0].url;
+    else if (e.category === "thennow" && e.nowPhoto) url = e.nowPhoto.url;
+    else if (e.category === "pregnancy" && e.subtype === "bump" && e.weeks && e.weeks.length) {
+      url = [...e.weeks].sort((a, b) => b.week - a.week)[0].photo?.url || null;
+    }
+    if (url) collagePhotos.push(url);
+  }
+
+  const dateRangeTxt = trip ? formatTripDateRange(trip.startDate, trip.endDate) : "";
+  return `
+    <div class="card trip-card" data-trip-open="${tripId}">
+      <div class="trip-collage trip-collage-${Math.min(collagePhotos.length, 4)}">
+        ${collagePhotos.map(url => `<div class="trip-collage-tile" style="background-image:url('${url}')"></div>`).join("")}
+        ${collagePhotos.length === 0 ? `<div class="trip-collage-empty">🧳</div>` : ""}
+      </div>
+      <div class="trip-card-body">
+        <div class="trip-card-title">🧳 ${escapeHtml(trip ? trip.title : "Trip")}</div>
+        ${trip && trip.location ? `<div class="trip-card-location">📍 ${escapeHtml(trip.location)}</div>` : ""}
+        <div class="trip-card-meta">${dateRangeTxt}${dateRangeTxt ? " · " : ""}${tripEntries.length} moment${tripEntries.length === 1 ? "" : "s"}</div>
+      </div>
+    </div>`;
+}
+
+function formatTripDateRange(startDate, endDate) {
+  if (!startDate) return "";
+  const start = parseLocalDate(startDate);
+  if (isNaN(start)) return "";
+  const startTxt = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (!endDate) return startTxt;
+  const end = parseLocalDate(endDate);
+  if (isNaN(end)) return startTxt;
+  if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
+    return `${start.toLocaleDateString('en-US', { month: 'short' })} ${start.getDate()}–${end.getDate()}, ${start.getFullYear()}`;
+  }
+  return `${startTxt} – ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
 // ---- On This Day: resurfaces a random past-years entry from today's date ----
@@ -793,6 +865,9 @@ function bindCardEvents(root) {
       if (isNowExpanded) expandedBumpEntries.add(entryId); else expandedBumpEntries.delete(entryId);
       btn.textContent = isNowExpanded ? "▴ Show as scroll" : "▾ Show all weeks";
     });
+  });
+  root.querySelectorAll("[data-trip-open]").forEach(card => {
+    card.addEventListener("click", () => openTripDetail(card.dataset.tripOpen));
   });
   initThenNowSliders(root);
   const shuffleBtn = root.querySelector("#onThisDayShuffleBtn");
@@ -1080,6 +1155,59 @@ function tagLabel(t) {
   return t.isPrivate ? `🔒 ${t.name}` : t.name;
 }
 
+function tripChipsInnerHtml(selectedTripId) {
+  return `
+    ${TRIPS.map(t => `<div class="chip ${selectedTripId === t.id ? 'selected' : ''}" data-trip="${t.id}">🧳 ${escapeHtml(t.title)}</div>`).join("")}
+    <div class="chip" id="newTripChip">+ New Trip</div>`;
+}
+
+function bindTripChipEvents() {
+  const container = document.getElementById("tripChips");
+  container.querySelectorAll(".chip[data-trip]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      // Single-select: picking one deselects the rest; tapping the already-
+      // selected one again unassigns the entry from any trip.
+      const wasSelected = chip.classList.contains("selected");
+      container.querySelectorAll(".chip[data-trip]").forEach(c => c.classList.remove("selected"));
+      if (!wasSelected) chip.classList.add("selected");
+    });
+  });
+  const newTripChip = document.getElementById("newTripChip");
+  newTripChip.addEventListener("click", () => {
+    const formEl = document.getElementById("newTripForm");
+    formEl.style.display = formEl.style.display === "none" ? "block" : "none";
+  });
+}
+
+async function createNewTripInline() {
+  const title = getVal("fNewTripTitle").trim();
+  if (!title) { showToast("Enter a trip title first"); return; }
+  const location = getVal("fNewTripLocation").trim();
+  const startDate = getVal("fNewTripStart");
+  if (!startDate) { showToast("Pick a start date first"); return; }
+  const endDate = getVal("fNewTripEnd");
+
+  const btn = document.getElementById("createTripBtn");
+  btn.disabled = true;
+  btn.textContent = "Creating...";
+  try {
+    const docRef = await addDoc(collection(db, "trips"), {
+      title, location: location || null, startDate, endDate: endDate || null, createdAt: serverTimestamp()
+    });
+    TRIPS.unshift({ id: docRef.id, title, location: location || null, startDate, endDate: endDate || null });
+    document.getElementById("tripChips").innerHTML = tripChipsInnerHtml(docRef.id);
+    bindTripChipEvents();
+    document.getElementById("newTripForm").style.display = "none";
+    showToast(`"${title}" created`);
+  } catch (err) {
+    console.error("Create trip error:", err);
+    showToast("Couldn't create trip — try again");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Create trip";
+  }
+}
+
 async function addNewTagInline() {
   const input = document.getElementById("newTagInput");
   const name = input.value.trim();
@@ -1144,6 +1272,24 @@ function renderEntryForm(existing) {
       <div style="display:flex; gap:8px; margin-top:8px;">
         <input type="text" id="newTagInput" placeholder="Create a new tag..." style="flex:1;">
         <button type="button" class="btn-secondary" id="addNewTagBtn" style="width:auto; margin-top:0; padding:9px 16px; white-space:nowrap;">Add</button>
+      </div>
+    </div>`;
+
+  const selectedTripId = existing ? (existing.tripId || null) : null;
+  const tripChips = `
+    <div class="field">
+      <label>Part of a trip? (optional)</label>
+      <div class="chip-select" id="tripChips">
+        ${tripChipsInnerHtml(selectedTripId)}
+      </div>
+      <div id="newTripForm" style="display:none; margin-top:10px;">
+        <div class="field"><label>Trip title</label><input type="text" id="fNewTripTitle" placeholder="e.g. Hilton Head 2026"></div>
+        <div class="field"><label>Location (optional)</label><input type="text" id="fNewTripLocation" placeholder="e.g. Hilton Head Island, SC"></div>
+        <div class="field-row">
+          <div class="field"><label>Start date</label><input type="date" id="fNewTripStart" value="${today}"></div>
+          <div class="field"><label>End date (optional)</label><input type="date" id="fNewTripEnd"></div>
+        </div>
+        <button type="button" class="btn-secondary" id="createTripBtn" style="width:auto; padding:9px 16px; margin-top:0;">Create trip</button>
       </div>
     </div>`;
 
@@ -1281,6 +1427,7 @@ function renderEntryForm(existing) {
     ${typeFields}
     ${kidChips}
     ${tagChips}
+    ${tripChips}
     <button class="btn-primary" id="saveEntryBtn">Save</button>
     <button class="btn-secondary" id="cancelEntryBtn">Cancel</button>
   `;
@@ -1298,6 +1445,10 @@ function renderEntryForm(existing) {
   document.getElementById("newTagInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); addNewTagInline(); }
   });
+
+  // Trip chip toggling (single-select) + inline new-trip creation
+  bindTripChipEvents();
+  document.getElementById("createTripBtn").addEventListener("click", createNewTripInline);
 
   // Milestone suggestion chips
   content.querySelectorAll("[data-milestone]").forEach(chip => {
@@ -1938,11 +2089,13 @@ async function saveEntry() {
     const selectedKids = Array.from(document.querySelectorAll("#kidChips .chip.selected")).map(c => c.dataset.kid);
     localStorage.setItem("masonsbook_last_kids", JSON.stringify(selectedKids));
     const selectedTags = Array.from(document.querySelectorAll("#tagChips .chip.selected")).map(c => c.dataset.tag);
+    const selectedTripChip = document.querySelector("#tripChips .chip.selected[data-trip]");
 
     const date = document.getElementById("fDate").value;
     const data = {
       category: selectedType, kids: selectedKids, tags: selectedTags,
       isPrivate: selectedTags.includes("private"), // real field the view-mode query filters on
+      tripId: selectedTripChip ? selectedTripChip.dataset.trip : null,
       date, updatedAt: serverTimestamp()
     };
 
@@ -2218,6 +2371,108 @@ async function toggleCategoryHidden(id) {
   } catch (err) {
     console.error("Toggle category error:", err);
     showToast("Couldn't save — try again");
+  }
+}
+
+function openTripDetail(tripId) {
+  renderTripDetail(tripId);
+  document.getElementById("addSheetOverlay").classList.add("open");
+  lockBodyScroll();
+}
+
+function renderTripDetail(tripId) {
+  const content = document.getElementById("addSheetContent");
+  const trip = TRIPS.find(t => t.id === tripId);
+  // Oldest-first here (unlike the main feed) — reads like a proper recap:
+  // arrived, then this happened, then that, rather than newest-first.
+  const tripEntries = entries.filter(e => e.tripId === tripId)
+    .sort((a, b) => parseLocalDate(a.date) - parseLocalDate(b.date));
+  const dateRangeTxt = trip ? formatTripDateRange(trip.startDate, trip.endDate) : "";
+
+  content.innerHTML = `
+    <div class="trip-detail-header">
+      <div class="sheet-title" style="margin-bottom:2px;">🧳 ${escapeHtml(trip ? trip.title : "Trip")}</div>
+      ${trip && trip.location ? `<div class="trip-detail-location">📍 ${escapeHtml(trip.location)}</div>` : ""}
+      <div class="trip-detail-meta">${dateRangeTxt}${dateRangeTxt ? " · " : ""}${tripEntries.length} moment${tripEntries.length === 1 ? "" : "s"}</div>
+      ${isEditMode ? `
+        <div class="trip-detail-actions">
+          <button type="button" class="btn-secondary" id="editTripBtn" style="width:auto; padding:7px 14px; margin-top:0;">✎ Edit trip</button>
+          <button type="button" class="btn-secondary danger" id="deleteTripBtn" style="width:auto; padding:7px 14px; margin-top:0;">🗑 Delete trip</button>
+        </div>` : ""}
+    </div>
+    <div class="trip-detail-feed">
+      ${tripEntries.length ? tripEntries.map(e => renderCard(e)).join("") : `<div class="feed-empty">No moments in this trip yet.</div>`}
+    </div>
+    <button class="btn-secondary" id="closeTripDetailBtn">Close</button>
+  `;
+
+  bindCardEvents(content); // lightbox / bump / thennow / edit / delete all work the same in here
+  document.getElementById("closeTripDetailBtn").addEventListener("click", closeAddSheet);
+  if (isEditMode) {
+    document.getElementById("editTripBtn").addEventListener("click", () => openTripEditForm(tripId));
+    document.getElementById("deleteTripBtn").addEventListener("click", () => confirmDeleteTrip(tripId));
+  }
+}
+
+function openTripEditForm(tripId) {
+  const trip = TRIPS.find(t => t.id === tripId);
+  if (!trip) return;
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">✎ Edit trip</div>
+    <div class="field"><label>Trip title</label><input type="text" id="fEditTripTitle" value="${escapeHtml(trip.title || "")}"></div>
+    <div class="field"><label>Location (optional)</label><input type="text" id="fEditTripLocation" value="${escapeHtml(trip.location || "")}"></div>
+    <div class="field-row">
+      <div class="field"><label>Start date</label><input type="date" id="fEditTripStart" value="${trip.startDate || ""}"></div>
+      <div class="field"><label>End date (optional)</label><input type="date" id="fEditTripEnd" value="${trip.endDate || ""}"></div>
+    </div>
+    <button class="btn-primary" id="saveTripEditBtn">Save</button>
+    <button class="btn-secondary" id="cancelTripEditBtn">Cancel</button>
+  `;
+  document.getElementById("saveTripEditBtn").addEventListener("click", () => saveTripEdit(tripId));
+  document.getElementById("cancelTripEditBtn").addEventListener("click", () => renderTripDetail(tripId));
+}
+
+async function saveTripEdit(tripId) {
+  const title = getVal("fEditTripTitle").trim();
+  if (!title) { showToast("Enter a trip title first"); return; }
+  const location = getVal("fEditTripLocation").trim();
+  const startDate = getVal("fEditTripStart");
+  if (!startDate) { showToast("Pick a start date first"); return; }
+  const endDate = getVal("fEditTripEnd");
+
+  const btn = document.getElementById("saveTripEditBtn");
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+  try {
+    await updateDoc(doc(db, "trips", tripId), { title, location: location || null, startDate, endDate: endDate || null });
+    showToast("Trip updated");
+    renderTripDetail(tripId);
+  } catch (err) {
+    console.error("Edit trip error:", err);
+    showToast("Couldn't save — try again");
+    btn.disabled = false;
+    btn.textContent = "Save";
+  }
+}
+
+function confirmDeleteTrip(tripId) {
+  const trip = TRIPS.find(t => t.id === tripId);
+  if (confirm(`Delete "${trip ? trip.title : 'this trip'}"? Its entries are kept — they'll just no longer be grouped together.`)) {
+    deleteTrip(tripId);
+  }
+}
+
+async function deleteTrip(tripId) {
+  try {
+    const tripEntries = entries.filter(e => e.tripId === tripId);
+    await Promise.all(tripEntries.map(e => updateDoc(doc(db, "entries", e.id), { tripId: null })));
+    await deleteDoc(doc(db, "trips", tripId));
+    showToast("Trip deleted");
+    closeAddSheet();
+  } catch (err) {
+    console.error("Delete trip error:", err);
+    showToast("Couldn't delete — try again");
   }
 }
 
