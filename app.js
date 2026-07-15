@@ -183,14 +183,39 @@ async function listenToKids() {
 function checkEditRoute() {
   const params = new URLSearchParams(window.location.search);
   const wantsEdit = params.get("edit") === "1";
-  if (!wantsEdit) return;
-
-  const deviceAuthed = localStorage.getItem(DEVICE_AUTH_KEY) === "true";
-  if (deviceAuthed) {
-    enterEditMode();
-  } else {
-    openPinScreen();
+  if (wantsEdit) {
+    const deviceAuthed = localStorage.getItem(DEVICE_AUTH_KEY) === "true";
+    if (deviceAuthed) {
+      enterEditMode();
+    } else {
+      openPinScreen();
+    }
   }
+  bindWordmarkEditTrigger();
+}
+
+// Installed/standalone PWAs hide the address bar, so there's no way to type
+// ?edit=1 once the app is on the home screen. Tapping the wordmark 5 times
+// within 2 seconds gets you the same PIN screen (or straight into edit mode
+// if this device is already remembered) without needing a URL at all.
+let wordmarkTapCount = 0;
+let wordmarkTapTimer = null;
+function bindWordmarkEditTrigger() {
+  document.getElementById("wordmark").addEventListener("click", () => {
+    if (isEditMode) return; // already in
+    wordmarkTapCount++;
+    clearTimeout(wordmarkTapTimer);
+    wordmarkTapTimer = setTimeout(() => { wordmarkTapCount = 0; }, 2000);
+    if (wordmarkTapCount >= 5) {
+      wordmarkTapCount = 0;
+      const deviceAuthed = localStorage.getItem(DEVICE_AUTH_KEY) === "true";
+      if (deviceAuthed) {
+        enterEditMode();
+      } else {
+        openPinScreen();
+      }
+    }
+  });
 }
 
 function enterEditMode() {
