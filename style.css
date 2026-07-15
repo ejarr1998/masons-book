@@ -574,6 +574,16 @@ input, textarea, select{ font-family: inherit; }
 .trip-detail-feed{ display:flex; flex-direction:column; gap:16px; margin-bottom:16px; }
 .btn-secondary.danger{ color: var(--danger); border-color: var(--danger); }
 
+/* Trips filter section: grouped by year, each row shows its date range */
+.trip-filter-list{ display:flex; flex-direction:column; gap:6px; }
+.trip-filter-row{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding: 10px 12px; background: var(--white); border:1px solid var(--taupe); border-radius:10px; cursor:pointer;
+}
+.trip-filter-row:active{ background: var(--parchment-2); }
+.trip-filter-row-title{ font-weight:700; font-size:13.5px; color: var(--ink); }
+.trip-filter-row-dates{ font-size:11px; color: var(--ink-soft); white-space:nowrap; flex-shrink:0; }
+
 .collapse-toggle{
   font-size:12.5px; font-weight:700; color: var(--rust); background:none; border:none;
   padding: 4px 0; cursor:pointer; margin-bottom: 8px;
