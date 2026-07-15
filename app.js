@@ -49,7 +49,8 @@ const CATEGORIES = {
   letter:     { label: "Letter",       emoji: "✉️", tagLabel: "Letter" },
   pregnancy:  { label: "Pregnancy",    emoji: "🤰", tagLabel: "Pregnancy" },
   birth:      { label: "Birth Day",    emoji: "👶", tagLabel: "Birth Day" },
-  thennow:    { label: "Then vs. Now", emoji: "↔️", tagLabel: "Then vs. Now" }
+  thennow:    { label: "Then vs. Now", emoji: "↔️", tagLabel: "Then vs. Now" },
+  firstyear:  { label: "First Year",   emoji: "🎞️", tagLabel: "First Year" }
 };
 
 const MILESTONE_SUGGESTIONS = [
@@ -64,6 +65,25 @@ const PREGNANCY_SUBTYPES = {
   scan:    { label: "Scan",    emoji: "🩻" },
   bump:    { label: "Bump Progression", emoji: "📈" }
 };
+
+// Fixed 13-checkpoint timeline for the First Year photo progression — unlike
+// Bump Progression's open-ended weekly log, this is a bounded set you fill
+// in over the year, so the form shows all 13 slots up front.
+const FIRST_YEAR_MONTHS = [
+  { idx: 0, label: "Birth" },
+  { idx: 1, label: "1 Month" },
+  { idx: 2, label: "2 Months" },
+  { idx: 3, label: "3 Months" },
+  { idx: 4, label: "4 Months" },
+  { idx: 5, label: "5 Months" },
+  { idx: 6, label: "6 Months" },
+  { idx: 7, label: "7 Months" },
+  { idx: 8, label: "8 Months" },
+  { idx: 9, label: "9 Months" },
+  { idx: 10, label: "10 Months" },
+  { idx: 11, label: "11 Months" },
+  { idx: 12, label: "12 Months" }
+];
 
 // ---- State ----
 let entries = [];
@@ -85,6 +105,8 @@ let pendingPhotoMeta = []; // {location, people} kept index-aligned with pending
 let thenNowPending = { then: null, now: null }; // staged Files for the Then/Now slider, keyed by side
 let thenNowExisting = { then: null, now: null }; // already-uploaded {url, path} photos when editing
 let thenNowFocal = { then: { x: 50, y: 50 }, now: { x: 50, y: 50 } }; // object-position focal point per side, as percentages
+let firstYearPending = {}; // { [monthIdx]: File } staged photos not yet uploaded
+let firstYearExisting = {}; // { [monthIdx]: {url, path} } already-uploaded photos when editing
 let bumpWeekRows = []; // [{week, date, existingPhoto, pendingFile}] for the Bump Progression pregnancy sub-type
 let taggingPhotoRef = null; // { source: 'existing'|'pending', index } — which photo the tag editor is open on
 let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid, shared via Firestore
@@ -861,6 +883,21 @@ function renderCard(e) {
               ${e.caption ? `<p class="card-text">${escapeHtml(e.caption)}</p>` : ""}`;
       break;
     }
+    case "firstyear": {
+      body = `<div class="card-title">${escapeHtml(e.title || "First Year")}</div>
+              <div class="firstyear-scrubber" data-firstyear-entry="${e.id}">
+                <div class="firstyear-stage">
+                  <img class="firstyear-img" id="firstyearImgA-${e.id}" alt="">
+                  <img class="firstyear-img" id="firstyearImgB-${e.id}" alt="">
+                  <button type="button" class="firstyear-play-btn" id="firstyearPlay-${e.id}" title="Play">▶</button>
+                </div>
+                <div class="firstyear-caption" id="firstyearCaption-${e.id}"></div>
+                <div class="firstyear-track" id="firstyearTrack-${e.id}">
+                  ${FIRST_YEAR_MONTHS.map(m => `<div class="firstyear-tick" data-tick-idx="${m.idx}" title="${m.label}"></div>`).join("")}
+                </div>
+              </div>`;
+      break;
+    }
     default: // photo
       body = `${e.caption ? `<p class="photo-caption">${escapeHtml(e.caption)}</p>` : ""}
               ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
@@ -944,6 +981,7 @@ function bindCardEvents(root) {
     card.addEventListener("click", () => openTripDetail(card.dataset.tripOpen));
   });
   initThenNowSliders(root);
+  initFirstYearScrubbers(root);
   const shuffleBtn = root.querySelector("#onThisDayShuffleBtn");
   if (shuffleBtn) {
     shuffleBtn.addEventListener("click", () => {
@@ -1008,6 +1046,103 @@ function initThenNowSliders(root) {
   });
 }
 
+const FIRSTYEAR_PLAY_INTERVAL_MS = 2500;
+
+function initFirstYearScrubbers(root) {
+  root.querySelectorAll(".firstyear-scrubber").forEach(scrubber => {
+    const entryId = scrubber.dataset.firstyearEntry;
+    const entry = entries.find(en => en.id === entryId);
+    const months = entry && entry.months ? [...entry.months].sort((a, b) => a.monthIndex - b.monthIndex) : [];
+    if (months.length === 0) return;
+
+    const imgA = document.getElementById(`firstyearImgA-${entryId}`);
+    const imgB = document.getElementById(`firstyearImgB-${entryId}`);
+    const captionEl = document.getElementById(`firstyearCaption-${entryId}`);
+    const track = document.getElementById(`firstyearTrack-${entryId}`);
+    const playBtn = document.getElementById(`firstyearPlay-${entryId}`);
+
+    // Ticks for months without a photo yet stay dim and unclickable — only
+    // real checkpoints can be landed on.
+    track.querySelectorAll(".firstyear-tick").forEach(tick => {
+      const idx = parseInt(tick.dataset.tickIdx, 10);
+      if (months.some(m => m.monthIndex === idx)) tick.classList.add("has-photo");
+    });
+
+    let activeLayer = "a";
+    let pos = 0; // index into `months`
+    let playing = false;
+    let playTimer = null;
+
+    function showMonth(newPos) {
+      pos = newPos;
+      const monthData = months[pos];
+      const showEl = activeLayer === "a" ? imgB : imgA;
+      const hideEl = activeLayer === "a" ? imgA : imgB;
+      showEl.src = monthData.photo.url;
+      showEl.classList.add("active");
+      hideEl.classList.remove("active");
+      activeLayer = activeLayer === "a" ? "b" : "a";
+      captionEl.textContent = monthData.label;
+      track.querySelectorAll(".firstyear-tick").forEach(t => {
+        t.classList.toggle("current", parseInt(t.dataset.tickIdx, 10) === monthData.monthIndex);
+      });
+    }
+
+    function stopPlaying() {
+      playing = false;
+      clearInterval(playTimer);
+      playBtn.textContent = "▶";
+    }
+    function startPlaying() {
+      if (months.length < 2) return;
+      playing = true;
+      playBtn.textContent = "⏸";
+      playTimer = setInterval(() => showMonth((pos + 1) % months.length), FIRSTYEAR_PLAY_INTERVAL_MS);
+    }
+
+    playBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (playing) stopPlaying(); else startPlaying();
+    });
+
+    function snapToClientX(clientX) {
+      const rect = track.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const nearestMonthIdx = Math.round(pct * 12);
+      let best = months[0];
+      let bestDist = Infinity;
+      months.forEach(m => {
+        const d = Math.abs(m.monthIndex - nearestMonthIdx);
+        if (d < bestDist) { bestDist = d; best = m; }
+      });
+      const newPos = months.indexOf(best);
+      if (newPos !== pos) {
+        stopPlaying();
+        showMonth(newPos);
+      }
+    }
+
+    let dragging = false;
+    track.addEventListener("pointerdown", (ev) => {
+      dragging = true;
+      track.setPointerCapture(ev.pointerId);
+      snapToClientX(ev.clientX);
+      ev.stopPropagation();
+    });
+    track.addEventListener("pointermove", (ev) => {
+      if (!dragging) return;
+      snapToClientX(ev.clientX);
+    });
+    track.addEventListener("pointerup", (ev) => {
+      dragging = false;
+      track.releasePointerCapture(ev.pointerId);
+    });
+    track.addEventListener("pointercancel", () => { dragging = false; });
+
+    showMonth(0);
+  });
+}
+
 // ============================================================
 // SLIDESHOW
 // ============================================================
@@ -1035,6 +1170,10 @@ function collectSlideshowPhotos(sourceEntries) {
     } else if (e.category === "pregnancy" && e.subtype === "bump" && e.weeks && e.weeks.length) {
       [...e.weeks].sort((a, b) => a.week - b.week).forEach(w => {
         if (w.photo) photos.push({ url: w.photo.url, caption: `Week ${w.week}` });
+      });
+    } else if (e.category === "firstyear" && e.months && e.months.length) {
+      [...e.months].sort((a, b) => a.monthIndex - b.monthIndex).forEach(m => {
+        if (m.photo) photos.push({ url: m.photo.url, caption: m.label });
       });
     }
   }
@@ -1343,6 +1482,8 @@ function openAddSheet() {
   thenNowPending = { then: null, now: null };
   thenNowExisting = { then: null, now: null };
   thenNowFocal = { then: { x: 50, y: 50 }, now: { x: 50, y: 50 } };
+  firstYearPending = {};
+  firstYearExisting = {};
   renderTypePicker();
   document.getElementById("addSheetOverlay").classList.add("open");
   lockBodyScroll();
@@ -1365,6 +1506,9 @@ function openEditSheet(entryId) {
   thenNowPending = { then: null, now: null };
   thenNowExisting = { then: entry.thenPhoto || null, now: entry.nowPhoto || null };
   thenNowFocal = { then: entry.thenFocal || { x: 50, y: 50 }, now: entry.nowFocal || { x: 50, y: 50 } };
+  firstYearPending = {};
+  firstYearExisting = {};
+  (entry.months || []).forEach(m => { firstYearExisting[m.monthIndex] = m.photo; });
   renderEntryForm(entry);
   document.getElementById("addSheetOverlay").classList.add("open");
   lockBodyScroll();
@@ -1688,6 +1832,27 @@ function renderEntryForm(existing) {
         </div>
         <div class="field"><label>Caption (optional)</label><textarea id="fCaption" placeholder="What's changed...">${existing ? existing.caption || "" : ""}</textarea></div>`;
       break;
+    case "firstyear":
+      typeFields = `
+        <div class="field"><label>Title (optional)</label><input type="text" id="fTitle" placeholder="e.g. Mason's First Year" value="${existing ? escapeHtml(existing.title || "") : ""}"></div>
+        <div class="type-hint">Fill these in as they happen — you don't need all 13 at once.</div>
+        <div class="firstyear-form-rows">
+          ${FIRST_YEAR_MONTHS.map(m => {
+            const existingPhoto = firstYearExisting[m.idx];
+            return `
+            <div class="firstyear-form-row">
+              <div class="bump-week-photo-slot firstyear-form-slot" id="firstYearSlot${m.idx}">
+                <img class="bumpRowPreviewImg" id="firstYearPreview${m.idx}" src="${existingPhoto ? existingPhoto.url : ''}" style="${existingPhoto ? '' : 'display:none;'}">
+                <label class="bump-week-photo-btn">
+                  📷
+                  <input type="file" accept="image/*" id="firstYearFile${m.idx}" style="display:none;">
+                </label>
+              </div>
+              <div class="firstyear-form-row-label">${m.label}</div>
+            </div>`;
+          }).join("")}
+        </div>`;
+      break;
     case "pregnancy":
       typeFields = `
         <div class="field">
@@ -1755,6 +1920,11 @@ function renderEntryForm(existing) {
   // Then vs. Now photo slots
   if (selectedType === "thennow") {
     initThenNowFields();
+  }
+
+  // First Year: 13 fixed photo slots
+  if (selectedType === "firstyear") {
+    initFirstYearFields();
   }
 
   // Context toggle for funny thing
@@ -2029,6 +2199,28 @@ function bindThenNowSlot(side) {
     frame.releasePointerCapture(e.pointerId);
   });
   frame.addEventListener("pointercancel", () => { dragging = false; });
+}
+
+function initFirstYearFields() {
+  FIRST_YEAR_MONTHS.forEach(m => {
+    const fileInput = document.getElementById(`firstYearFile${m.idx}`);
+    const previewImg = document.getElementById(`firstYearPreview${m.idx}`);
+    fileInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      firstYearPending[m.idx] = file;
+      previewImg.onerror = () => { previewImg.style.display = "none"; };
+      if (isHeicFile(file)) {
+        convertHeicIfNeeded(file).then(converted => {
+          previewImg.src = URL.createObjectURL(converted);
+          previewImg.style.display = "block";
+        });
+      } else {
+        previewImg.src = URL.createObjectURL(file);
+        previewImg.style.display = "block";
+      }
+    });
+  });
 }
 
 let lastFocusedSpeakerRow = null;
@@ -2365,6 +2557,10 @@ async function saveEntry() {
     showToast("Add a \"Now\" photo first");
     return;
   }
+  if (selectedType === "firstyear" && !FIRST_YEAR_MONTHS.some(m => firstYearPending[m.idx] || firstYearExisting[m.idx])) {
+    showToast("Add at least one photo first");
+    return;
+  }
 
   const btn = document.getElementById("saveEntryBtn");
   btn.disabled = true;
@@ -2440,6 +2636,19 @@ async function saveEntry() {
         data.nowPhoto = thenNowPending.now ? (await uploadPhotos([thenNowPending.now]))[0] : thenNowExisting.now;
         data.thenFocal = thenNowFocal.then;
         data.nowFocal = thenNowFocal.now;
+        break;
+      }
+      case "firstyear": {
+        data.title = getVal("fTitle");
+        const months = [];
+        for (const m of FIRST_YEAR_MONTHS) {
+          let photo = firstYearExisting[m.idx] || null;
+          if (firstYearPending[m.idx]) {
+            photo = (await uploadPhotos([firstYearPending[m.idx]]))[0];
+          }
+          if (photo) months.push({ monthIndex: m.idx, label: m.label, photo });
+        }
+        data.months = months;
         break;
       }
       default: // custom user-created types
