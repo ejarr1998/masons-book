@@ -206,20 +206,27 @@ async function listenToKids() {
 function checkEditRoute() {
   bindWordmarkEditTrigger();
 
-  // Once this device has proven it knows the PIN, there's no reason to make
-  // it re-prove that (or hunt for a URL param / tap gesture) on every single
-  // launch — it just stays in edit mode going forward, same as a native app
-  // staying logged in. Only a device that's NEVER been unlocked (e.g. a
-  // family member's view-only phone) falls through to view mode below.
   const deviceAuthed = localStorage.getItem(DEVICE_AUTH_KEY) === "true";
-  if (deviceAuthed) {
+  const isInstalledApp = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+
+  // Auto-elevating into edit mode without needing a URL only applies to the
+  // installed home-screen app — that's specifically YOUR device staying
+  // logged in, like a native app would. A regular browser tab — including
+  // the plain shareable link — should always start in view mode, even on a
+  // device that's proven the PIN before, so that link keeps working as the
+  // "view as a guest" experience it's meant to be.
+  if (isInstalledApp && deviceAuthed) {
     enterEditMode();
     return;
   }
 
   const params = new URLSearchParams(window.location.search);
   if (params.get("edit") === "1") {
-    openPinScreen();
+    if (deviceAuthed) {
+      enterEditMode();
+    } else {
+      openPinScreen();
+    }
   }
 }
 
