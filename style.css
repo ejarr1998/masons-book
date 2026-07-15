@@ -645,6 +645,40 @@ input, textarea, select{ font-family: inherit; }
 .lightbox-tap-zone.left{ left:0; }
 .lightbox-tap-zone.right{ right:0; }
 
+/* Slideshow: full-screen autoplay viewer, rotates freely into landscape */
+.slideshow-overlay{
+  position:fixed; inset:0; background:#000; z-index:250;
+  display:flex; flex-direction:column;
+  opacity:0; pointer-events:none; transition:opacity .2s ease;
+}
+.slideshow-overlay.open{ opacity:1; pointer-events:auto; }
+.slideshow-top{ position:relative; z-index:10; padding: 14px 16px 10px; flex-shrink:0; }
+.slideshow-progress-track{ width:100%; height:3px; background:rgba(255,255,255,0.25); border-radius:100px; overflow:hidden; }
+.slideshow-progress-fill{ height:100%; background:#fff; border-radius:100px; transition: width .3s ease; }
+.slideshow-top-row{ display:flex; align-items:center; justify-content:space-between; margin-top:10px; }
+.slideshow-counter{ color:rgba(255,255,255,0.75); font-size:12px; font-weight:600; }
+.slideshow-top-actions{ display:flex; gap:6px; }
+.slideshow-icon-btn{
+  width:34px; height:34px; border-radius:50%; background:rgba(255,255,255,0.15); border:none;
+  color:#fff; font-size:15px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+}
+.slideshow-icon-btn#slideshowClose{ font-size:20px; }
+.slideshow-icon-btn.active{ background:var(--rust); }
+.slideshow-stage{ position:relative; flex:1; overflow:hidden; }
+.slideshow-img{
+  position:absolute; inset:0; width:100%; height:100%; object-fit:contain;
+  opacity:0; transition: opacity .6s ease;
+}
+.slideshow-img.active{ opacity:1; }
+.slideshow-tap-zone{ position:absolute; top:0; bottom:0; z-index:5; }
+.slideshow-tap-zone.left{ left:0; width:30%; }
+.slideshow-tap-zone.center{ left:30%; width:40%; }
+.slideshow-tap-zone.right{ right:0; width:30%; }
+.slideshow-caption{
+  position:relative; z-index:10; flex-shrink:0; color:rgba(246,241,231,0.9); text-align:center;
+  font-size:15px; padding: 10px 24px 18px; font-family:'Caveat', cursive; font-weight:600; line-height:1.4;
+}
+
 /* Photo people-tagging: pins, location pill, tag editor */
 .lightbox-img-wrap, .tag-editor-panel .lightbox-img-wrap{ position:relative; display:inline-block; line-height:0; }
 .tag-layer{ position:absolute; inset:0; pointer-events:none; }
