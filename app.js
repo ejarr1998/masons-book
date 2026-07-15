@@ -42,13 +42,14 @@ const DEVICE_AUTH_KEY = "masonsbook_device_authed";
 // ---- Category definitions ----
 const CATEGORIES = {
   photo:      { label: "Photo",        emoji: "📷", tagLabel: "Photo" },
-  funnything: { label: "Funny Thing",  emoji: "😂", tagLabel: "Said" },
+  funnything: { label: "Quotes",  emoji: "😂", tagLabel: "Said" },
   milestone:  { label: "Milestone",    emoji: "⭐", tagLabel: "Milestone" },
   stat:       { label: "Stat",         emoji: "📏", tagLabel: "Stat" },
   birthday:   { label: "Birthday",     emoji: "🎂", tagLabel: "Birthday" },
   letter:     { label: "Letter",       emoji: "✉️", tagLabel: "Letter" },
   pregnancy:  { label: "Pregnancy",    emoji: "🤰", tagLabel: "Pregnancy" },
-  birth:      { label: "Birth Day",    emoji: "👶", tagLabel: "Birth Day" }
+  birth:      { label: "Birth Day",    emoji: "👶", tagLabel: "Birth Day" },
+  thennow:    { label: "Then vs. Now", emoji: "↔️", tagLabel: "Then vs. Now" }
 };
 
 const MILESTONE_SUGGESTIONS = [
@@ -80,6 +81,8 @@ let editingEntryId = null; // if set, add sheet is in "edit existing" mode
 let editingPhotos = []; // existing photos on the entry currently being added/edited (removable)
 let removedPhotoPaths = []; // storage paths to actually delete once the save succeeds
 let pendingPhotoMeta = []; // {location, people} kept index-aligned with pendingPhotos
+let thenNowPending = { then: null, now: null }; // staged Files for the Then/Now slider, keyed by side
+let thenNowExisting = { then: null, now: null }; // already-uploaded {url, path} photos when editing
 let bumpWeekRows = []; // [{week, date, existingPhoto, pendingFile}] for the Bump Progression pregnancy sub-type
 let taggingPhotoRef = null; // { source: 'existing'|'pending', index } — which photo the tag editor is open on
 let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid, shared via Firestore
@@ -512,6 +515,10 @@ function kidsLabel(kidIds) {
   }).join(" & ");
 }
 
+let onThisDayPool = [];        // today's month/day matches from past years, recomputed each render
+let onThisDayShownIds = new Set(); // ids already surfaced this session, so "Show another" cycles instead of repeating
+let onThisDayCurrentId = null; // the entry currently displayed in the widget
+
 function renderFeed() {
   const feedEl = document.getElementById("feed");
   let filtered = entries.filter(e => {
@@ -524,13 +531,70 @@ function renderFeed() {
     return kidMatch && catMatch && yearMatch && monthMatch && tagMatch;
   });
 
+  // On This Day only makes sense on the all-time view — a specific year/month
+  // filter already IS a trip back in time, so the widget would be redundant.
+  let onThisDayHtml = "";
+  if (activeYearFilter === "all" && activeMonthFilter === "all") {
+    onThisDayPool = computeOnThisDayPool();
+    if (onThisDayPool.length > 0) {
+      let currentEntry = onThisDayPool.find(e => e.id === onThisDayCurrentId);
+      if (!currentEntry) currentEntry = pickOnThisDayEntry(onThisDayPool);
+      onThisDayHtml = renderOnThisDayWidgetHtml(currentEntry, onThisDayPool.length);
+    } else {
+      onThisDayCurrentId = null;
+    }
+  }
+
   if (filtered.length === 0) {
-    feedEl.innerHTML = `<div class="feed-empty">Nothing here yet.${isEditMode ? ' Tap + to add the first moment.' : ''}</div>`;
+    feedEl.innerHTML = onThisDayHtml + `<div class="feed-empty">Nothing here yet.${isEditMode ? ' Tap + to add the first moment.' : ''}</div>`;
+    bindCardEvents(feedEl);
     return;
   }
 
-  feedEl.innerHTML = filtered.map(e => renderCard(e)).join("");
-  bindCardEvents(filtered);
+  feedEl.innerHTML = onThisDayHtml + filtered.map(e => renderCard(e)).join("");
+  bindCardEvents(feedEl);
+}
+
+// ---- On This Day: resurfaces a random past-years entry from today's date ----
+
+function computeOnThisDayPool() {
+  const today = new Date();
+  return entries.filter(e => {
+    const d = parseLocalDate(e.date);
+    if (isNaN(d)) return false;
+    if (d.getMonth() !== today.getMonth() || d.getDate() !== today.getDate()) return false;
+    if (d.getFullYear() === today.getFullYear()) return false; // must be a past year, not today itself
+    // Letters that haven't hit their unlock date yet shouldn't resurface early.
+    if (e.category === "letter" && e.unlockDate) {
+      const unlock = parseLocalDate(e.unlockDate);
+      if (!isNaN(unlock) && unlock > today) return false;
+    }
+    const kidMatch = activeKidFilter === "all" || (e.kids || []).includes(activeKidFilter);
+    return kidMatch;
+  });
+}
+
+function pickOnThisDayEntry(pool) {
+  const unseen = pool.filter(e => !onThisDayShownIds.has(e.id));
+  // Once every match has been shown this session, reset so the cycle can repeat.
+  const choices = unseen.length > 0 ? unseen : (onThisDayShownIds.clear(), pool);
+  const picked = choices[Math.floor(Math.random() * choices.length)];
+  onThisDayShownIds.add(picked.id);
+  onThisDayCurrentId = picked.id;
+  return picked;
+}
+
+function renderOnThisDayWidgetHtml(entry, poolSize) {
+  const entryYear = parseLocalDate(entry.date).getFullYear();
+  const yearsAgo = new Date().getFullYear() - entryYear;
+  return `
+    <div class="on-this-day-wrap" id="onThisDayWrap">
+      <div class="on-this-day-header">
+        <span class="on-this-day-ribbon">🕰️ On This Day — ${yearsAgo} year${yearsAgo === 1 ? "" : "s"} ago</span>
+        ${poolSize > 1 ? `<button class="on-this-day-shuffle" id="onThisDayShuffleBtn" title="Show another">🔀 Another</button>` : ""}
+      </div>
+      ${renderCard(entry)}
+    </div>`;
 }
 
 function renderCard(e) {
@@ -632,6 +696,21 @@ function renderCard(e) {
                 ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
       }
       break;
+    case "thennow":
+      body = `<div class="card-title">${escapeHtml(e.title || "Then vs. Now")}</div>
+              <div class="thennow-slider" data-thennow-entry="${e.id}">
+                <img class="thennow-img thennow-now" src="${e.nowPhoto.url}">
+                <div class="thennow-clip">
+                  <img class="thennow-img thennow-then" src="${e.thenPhoto.url}">
+                </div>
+                <div class="thennow-handle">
+                  <span class="thennow-handle-grip">⇔</span>
+                </div>
+                ${e.thenLabel ? `<span class="thennow-tag thennow-tag-left">${escapeHtml(e.thenLabel)}</span>` : ""}
+                ${e.nowLabel ? `<span class="thennow-tag thennow-tag-right">${escapeHtml(e.nowLabel)}</span>` : ""}
+              </div>
+              ${e.caption ? `<p class="card-text">${escapeHtml(e.caption)}</p>` : ""}`;
+      break;
     default: // photo
       body = `${e.caption ? `<p class="photo-caption">${escapeHtml(e.caption)}</p>` : ""}
               ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
@@ -683,26 +762,26 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function bindCardEvents(filtered) {
-  document.querySelectorAll("[data-lightbox]").forEach(img => {
+function bindCardEvents(root) {
+  root.querySelectorAll("[data-lightbox]").forEach(img => {
     img.addEventListener("click", () => {
       const entryId = img.dataset.lightbox;
       const idx = parseInt(img.dataset.idx, 10);
-      const entry = filtered.find(e => e.id === entryId);
+      const entry = entries.find(e => e.id === entryId);
       openLightbox(entry.photos, idx, entry.caption || "");
     });
   });
-  document.querySelectorAll("[data-bump-entry]").forEach(thumb => {
+  root.querySelectorAll("[data-bump-entry]").forEach(thumb => {
     thumb.addEventListener("click", () => {
       const entryId = thumb.dataset.bumpEntry;
       const idx = parseInt(thumb.dataset.bumpIdx, 10);
-      const entry = filtered.find(e => e.id === entryId);
+      const entry = entries.find(e => e.id === entryId);
       const sortedWeeks = [...entry.weeks].sort((a, b) => a.week - b.week);
       const photosWithCaptions = sortedWeeks.map(w => ({ ...w.photo, caption: `Week ${w.week}` }));
       openLightbox(photosWithCaptions, idx, "");
     });
   });
-  document.querySelectorAll("[data-bump-toggle]").forEach(btn => {
+  root.querySelectorAll("[data-bump-toggle]").forEach(btn => {
     btn.addEventListener("click", () => {
       const entryId = btn.dataset.bumpToggle;
       const strip = document.getElementById(`bumpStrip-${entryId}`);
@@ -711,19 +790,70 @@ function bindCardEvents(filtered) {
       btn.textContent = isNowExpanded ? "▴ Show as scroll" : "▾ Show all weeks";
     });
   });
+  initThenNowSliders(root);
+  const shuffleBtn = root.querySelector("#onThisDayShuffleBtn");
+  if (shuffleBtn) {
+    shuffleBtn.addEventListener("click", () => {
+      const entry = pickOnThisDayEntry(onThisDayPool);
+      const wrap = document.getElementById("onThisDayWrap");
+      wrap.outerHTML = renderOnThisDayWidgetHtml(entry, onThisDayPool.length);
+      bindCardEvents(document.getElementById("onThisDayWrap"));
+    });
+  }
   if (isEditMode) {
-    document.querySelectorAll("[data-edit]").forEach(btn => {
+    root.querySelectorAll("[data-edit]").forEach(btn => {
       btn.addEventListener("click", () => openEditSheet(btn.dataset.edit));
     });
-    document.querySelectorAll("[data-delete]").forEach(btn => {
+    root.querySelectorAll("[data-delete]").forEach(btn => {
       btn.addEventListener("click", () => confirmDelete(btn.dataset.delete));
     });
   }
 }
 
-// ============================================================
-// LIGHTBOX
-// ============================================================
+function initThenNowSliders(root) {
+  root.querySelectorAll(".thennow-slider").forEach(slider => {
+    const clip = slider.querySelector(".thennow-clip");
+    const thenImg = clip.querySelector(".thennow-img");
+    const handle = slider.querySelector(".thennow-handle");
+    let dragging = false;
+
+    function sizeThenImage() {
+      const rect = slider.getBoundingClientRect();
+      thenImg.style.width = `${rect.width}px`;
+      thenImg.style.height = `${rect.height}px`;
+    }
+    sizeThenImage();
+    window.addEventListener("resize", sizeThenImage);
+
+    function setPosition(clientX) {
+      const rect = slider.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+      clip.style.width = `${pct}%`;
+      handle.style.left = `${pct}%`;
+    }
+
+    handle.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    handle.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      setPosition(e.clientX);
+    });
+    handle.addEventListener("pointerup", (e) => {
+      dragging = false;
+      handle.releasePointerCapture(e.pointerId);
+    });
+    handle.addEventListener("pointercancel", () => { dragging = false; });
+
+    // Tapping anywhere else on the image jumps the divider straight there.
+    slider.addEventListener("click", (e) => {
+      if (e.target.closest(".thennow-handle")) return;
+      setPosition(e.clientX);
+    });
+  });
+}
 
 let expandedBumpEntries = new Set(); // entry IDs currently showing the full grid instead of the scroll strip
 let lightboxPhotos = [];
@@ -860,6 +990,8 @@ function openAddSheet() {
   pendingPhotoMeta = [];
   editingPhotos = [];
   removedPhotoPaths = [];
+  thenNowPending = { then: null, now: null };
+  thenNowExisting = { then: null, now: null };
   renderTypePicker();
   document.getElementById("addSheetOverlay").classList.add("open");
   lockBodyScroll();
@@ -879,6 +1011,8 @@ function openEditSheet(entryId) {
     people: (p.people || []).map(person => ({ ...person }))
   })) : [];
   removedPhotoPaths = [];
+  thenNowPending = { then: null, now: null };
+  thenNowExisting = { then: entry.thenPhoto || null, now: entry.nowPhoto || null };
   renderEntryForm(entry);
   document.getElementById("addSheetOverlay").classList.add("open");
   lockBodyScroll();
@@ -1084,6 +1218,36 @@ function renderEntryForm(existing) {
         <div class="field"><label>Your letter</label><textarea id="fText" style="min-height:160px;" placeholder="Write from the heart...">${existing ? existing.text || "" : ""}</textarea></div>
         <div class="field"><label>Unlock date (optional)</label><input type="date" id="fUnlockDate" value="${existing ? existing.unlockDate || "" : ""}"></div>`;
       break;
+    case "thennow":
+      typeFields = `
+        <div class="field"><label>Title (optional)</label><input type="text" id="fTitle" placeholder="e.g. Newborn vs. 1 Year" value="${existing ? escapeHtml(existing.title || "") : ""}"></div>
+        <div class="thennow-slots">
+          <div class="thennow-slot-wrap">
+            <div class="thennow-slot-label">Then</div>
+            <div class="bump-week-photo-slot thennow-form-slot" id="thenPhotoSlot">
+              <img class="thennow-form-preview" id="thenPreviewImg" src="${thenNowExisting.then ? thenNowExisting.then.url : ''}" style="${thenNowExisting.then ? '' : 'display:none;'}">
+              <label class="bump-week-photo-btn">
+                📷
+                <input type="file" accept="image/*" id="fThenPhoto" style="display:none;">
+              </label>
+            </div>
+            <input type="text" id="fThenLabel" placeholder="e.g. Newborn" value="${existing ? escapeHtml(existing.thenLabel || "") : ""}">
+          </div>
+          <div class="thennow-arrow">→</div>
+          <div class="thennow-slot-wrap">
+            <div class="thennow-slot-label">Now</div>
+            <div class="bump-week-photo-slot thennow-form-slot" id="nowPhotoSlot">
+              <img class="thennow-form-preview" id="nowPreviewImg" src="${thenNowExisting.now ? thenNowExisting.now.url : ''}" style="${thenNowExisting.now ? '' : 'display:none;'}">
+              <label class="bump-week-photo-btn">
+                📷
+                <input type="file" accept="image/*" id="fNowPhoto" style="display:none;">
+              </label>
+            </div>
+            <input type="text" id="fNowLabel" placeholder="e.g. 1 Year Old" value="${existing ? escapeHtml(existing.nowLabel || "") : ""}">
+          </div>
+        </div>
+        <div class="field"><label>Caption (optional)</label><textarea id="fCaption" placeholder="What's changed...">${existing ? existing.caption || "" : ""}</textarea></div>`;
+      break;
     case "pregnancy":
       typeFields = `
         <div class="field">
@@ -1141,6 +1305,11 @@ function renderEntryForm(existing) {
   // Pregnancy sub-type fields (Update / Craving / Symptom / Scan)
   if (selectedType === "pregnancy") {
     initPregnancySubtypeFields(existing);
+  }
+
+  // Then vs. Now photo slots
+  if (selectedType === "thennow") {
+    initThenNowFields();
   }
 
   // Context toggle for funny thing
@@ -1342,6 +1511,33 @@ async function collectBumpWeeks() {
     results.push({ week: parseInt(week, 10), date, photo });
   }
   return results.sort((a, b) => a.week - b.week);
+}
+
+function initThenNowFields() {
+  bindThenNowSlot("then", document.getElementById("fThenPhoto"), document.getElementById("thenPreviewImg"), document.getElementById("thenPhotoSlot"));
+  bindThenNowSlot("now", document.getElementById("fNowPhoto"), document.getElementById("nowPreviewImg"), document.getElementById("nowPhotoSlot"));
+}
+
+function bindThenNowSlot(side, fileInput, previewImg, photoSlot) {
+  fileInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    thenNowPending[side] = file;
+    photoSlot.classList.remove("photo-selected-no-preview");
+    previewImg.onerror = () => {
+      previewImg.style.display = "none";
+      photoSlot.classList.add("photo-selected-no-preview");
+    };
+    if (isHeicFile(file)) {
+      convertHeicIfNeeded(file).then(converted => {
+        previewImg.src = URL.createObjectURL(converted);
+        previewImg.style.display = "block";
+      });
+    } else {
+      previewImg.src = URL.createObjectURL(file);
+      previewImg.style.display = "block";
+    }
+  });
 }
 
 let lastFocusedSpeakerRow = null;
@@ -1670,6 +1866,14 @@ async function saveEntry() {
     showToast("Add at least one craving first");
     return;
   }
+  if (selectedType === "thennow" && !(thenNowPending.then || thenNowExisting.then) ) {
+    showToast("Add a \"Then\" photo first");
+    return;
+  }
+  if (selectedType === "thennow" && !(thenNowPending.now || thenNowExisting.now) ) {
+    showToast("Add a \"Now\" photo first");
+    return;
+  }
 
   const btn = document.getElementById("saveEntryBtn");
   btn.disabled = true;
@@ -1732,6 +1936,15 @@ async function saveEntry() {
           data.title = getVal("fTitle");
           data.caption = getVal("fCaption");
         }
+        break;
+      }
+      case "thennow": {
+        data.title = getVal("fTitle");
+        data.caption = getVal("fCaption");
+        data.thenLabel = getVal("fThenLabel");
+        data.nowLabel = getVal("fNowLabel");
+        data.thenPhoto = thenNowPending.then ? (await uploadPhotos([thenNowPending.then]))[0] : thenNowExisting.then;
+        data.nowPhoto = thenNowPending.now ? (await uploadPhotos([thenNowPending.now]))[0] : thenNowExisting.now;
         break;
       }
       default: // custom user-created types
