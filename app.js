@@ -335,6 +335,10 @@ function tagsSummary() {
   return `${activeTagFilters.length} tags`;
 }
 
+function tripsSummary() {
+  return TRIPS.length === 0 ? "None yet" : `${TRIPS.length} trip${TRIPS.length === 1 ? "" : "s"}`;
+}
+
 function filterSectionHtml(id, title, summary, bodyHtml) {
   const expanded = !!expandedFilterSections[id];
   return `
@@ -403,6 +407,18 @@ function tagsSectionBodyHtml() {
   ).join("")}</div>`;
 }
 
+function tripsSectionBodyHtml() {
+  if (TRIPS.length === 0) {
+    return `<div style="font-size:13px; color:var(--ink-soft);">No trips yet — create one from the entry form when adding a moment.</div>`;
+  }
+  // Tapping a trip here jumps straight into it rather than toggling a filter —
+  // trips are always browsed through their own dedicated view, same as tapping
+  // the trip card in the feed.
+  return `<div class="chip-select">${TRIPS.map(t =>
+    `<div class="chip" data-trip-filter-chip="${t.id}">🧳 ${escapeHtml(t.title)}</div>`
+  ).join("")}</div>`;
+}
+
 function renderFiltersSheet() {
   const content = document.getElementById("addSheetContent");
   content.innerHTML = `
@@ -411,6 +427,7 @@ function renderFiltersSheet() {
     ${filterSectionHtml("type", "🏷️ Type of events", typeSummary(), typeSectionBodyHtml())}
     ${filterSectionHtml("dates", "📅 Dates", datesSummary(), datesSectionBodyHtml())}
     ${filterSectionHtml("tags", "🔖 Tags", tagsSummary(), tagsSectionBodyHtml())}
+    ${filterSectionHtml("trips", "🧳 Trips", tripsSummary(), tripsSectionBodyHtml())}
     <button class="btn-primary" id="applyFiltersBtn" style="margin-top:10px;">Show results</button>
     <button class="btn-secondary" id="clearAllFiltersBtn">Clear all filters</button>
   `;
@@ -461,6 +478,11 @@ function bindFilterSectionEvents() {
         ? activeTagFilters.filter(t => t !== id)
         : [...activeTagFilters, id];
       renderFiltersSheet();
+    });
+  });
+  content.querySelectorAll("[data-trip-filter-chip]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      renderTripDetail(chip.dataset.tripFilterChip); // sheet is already open; just swap its content
     });
   });
 
