@@ -547,6 +547,33 @@ input, textarea, select{ font-family: inherit; }
 }
 .on-this-day-shuffle:active{ background: var(--taupe); }
 
+/* Trip card: collapses all of a trip's entries into one grouped card */
+.trip-card{ cursor:pointer; }
+.trip-collage{
+  display:grid; width:100%; aspect-ratio: 16 / 10; background: var(--parchment-2);
+}
+.trip-collage-tile{ background-size:cover; background-position:center; }
+.trip-collage-0, .trip-collage-1{ grid-template-columns: 1fr; }
+.trip-collage-2{ grid-template-columns: 1fr 1fr; }
+.trip-collage-3{ grid-template-columns: 1.4fr 1fr; grid-template-rows: 1fr 1fr; }
+.trip-collage-3 .trip-collage-tile:first-child{ grid-row: 1 / 3; }
+.trip-collage-4{ grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.trip-collage-empty{
+  display:flex; align-items:center; justify-content:center; font-size:34px; opacity:0.5;
+}
+.trip-card-body{ padding: 13px 15px 15px; }
+.trip-card-title{ font-weight:800; font-size:15.5px; color: var(--forest); margin-bottom:3px; }
+.trip-card-location{ font-size:12px; color: var(--ink-soft); margin-bottom:4px; }
+.trip-card-meta{ font-size:11px; font-weight:600; color: var(--rust); text-transform:uppercase; letter-spacing:0.04em; }
+
+/* Trip detail view (reuses the shared bottom sheet) */
+.trip-detail-header{ margin-bottom:16px; }
+.trip-detail-location{ font-size:13px; color: var(--ink-soft); margin-bottom:4px; }
+.trip-detail-meta{ font-size:11.5px; font-weight:700; color: var(--rust); text-transform:uppercase; letter-spacing:0.03em; margin-bottom:12px; }
+.trip-detail-actions{ display:flex; gap:8px; }
+.trip-detail-feed{ display:flex; flex-direction:column; gap:16px; margin-bottom:16px; }
+.btn-secondary.danger{ color: var(--danger); border-color: var(--danger); }
+
 .collapse-toggle{
   font-size:12.5px; font-weight:700; color: var(--rust); background:none; border:none;
   padding: 4px 0; cursor:pointer; margin-bottom: 8px;
