@@ -29,6 +29,21 @@ export function calcAge(birthdateStr, atDateStr) {
   return `${years} yr${years === 1 ? '' : 's'}${remMonths ? ', ' + remMonths + ' mo' : ''} old`;
 }
 
+// Suggests which numbered birthday an entry represents, from the kid's
+// birthdate and the entry's date — e.g. a date roughly a year after birth is
+// "1", roughly three years after is "3". Returns "" if it can't be computed.
+export function computeBirthdayNumber(birthdateStr, entryDateStr) {
+  if (!birthdateStr || !entryDateStr) return "";
+  const birth = parseLocalDate(birthdateStr);
+  const entry = parseLocalDate(entryDateStr);
+  if (isNaN(birth) || isNaN(entry)) return "";
+  let years = entry.getFullYear() - birth.getFullYear();
+  const beforeAnniversary = (entry.getMonth() < birth.getMonth()) ||
+    (entry.getMonth() === birth.getMonth() && entry.getDate() < birth.getDate());
+  if (beforeAnniversary) years--;
+  return years >= 1 ? String(years) : "";
+}
+
 export function formatDate(dateStr) {
   const d = parseLocalDate(dateStr);
   if (isNaN(d)) return dateStr;
