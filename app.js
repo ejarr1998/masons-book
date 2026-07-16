@@ -900,6 +900,9 @@ function renderCard(e) {
                 <div class="firstyear-stage">
                   <img class="firstyear-img" id="firstyearImgA-${e.id}" alt="">
                   <img class="firstyear-img" id="firstyearImgB-${e.id}" alt="">
+                  <div class="firstyear-tap-zone left" id="firstyearTapPrev-${e.id}"></div>
+                  <div class="firstyear-tap-zone center" id="firstyearTapView-${e.id}"></div>
+                  <div class="firstyear-tap-zone right" id="firstyearTapNext-${e.id}"></div>
                 </div>
                 <div class="firstyear-caption" id="firstyearCaption-${e.id}"></div>
                 <div class="firstyear-track" id="firstyearTrack-${e.id}">
@@ -1123,6 +1126,21 @@ function initFirstYearScrubbers(root) {
       track.releasePointerCapture(ev.pointerId);
     });
     track.addEventListener("pointercancel", () => { dragging = false; });
+
+    // Tap the left/right edges of the photo to step to the adjacent
+    // available month (clamped at the ends — Birth and 12 Months are firm
+    // boundaries, not a loop). Tap the center to open it full-screen with
+    // the usual lightbox controls, including download.
+    document.getElementById(`firstyearTapPrev-${entryId}`).addEventListener("click", () => {
+      if (pos > 0) showMonth(pos - 1);
+    });
+    document.getElementById(`firstyearTapNext-${entryId}`).addEventListener("click", () => {
+      if (pos < months.length - 1) showMonth(pos + 1);
+    });
+    document.getElementById(`firstyearTapView-${entryId}`).addEventListener("click", () => {
+      const photosForLightbox = months.map(m => ({ ...m.photo, caption: m.label }));
+      openLightbox(photosForLightbox, pos, "");
+    });
 
     showMonth(0);
   });
