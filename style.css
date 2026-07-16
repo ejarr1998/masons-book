@@ -546,6 +546,10 @@ input, textarea, select{ font-family: inherit; }
   opacity:0; transition: opacity .5s ease;
 }
 .firstyear-img.active{ opacity:1; }
+.firstyear-tap-zone{ position:absolute; top:0; bottom:0; z-index:3; cursor:pointer; }
+.firstyear-tap-zone.left{ left:0; width:30%; }
+.firstyear-tap-zone.center{ left:30%; width:40%; }
+.firstyear-tap-zone.right{ right:0; width:30%; }
 .firstyear-caption{
   text-align:center; font-size:15px; font-weight:700; color: var(--forest);
   font-family:'Caveat', cursive; margin-bottom:8px;
