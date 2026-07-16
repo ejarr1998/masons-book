@@ -13,6 +13,11 @@ import {
 import {
   getAuth, signInAnonymously, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  MONTH_NAMES, parseLocalDate, calcAge, formatDate, formatTripDateRange,
+  escapeHtml, getVal, isHeicFile, convertHeicIfNeeded, showToast,
+  lockBodyScroll, unlockBodyScroll
+} from "./utils.js";
 
 // ---- Firebase config ----
 const firebaseConfig = {
@@ -123,20 +128,6 @@ let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid,
 // and "tap something in the modal," which can make taps silently fail to
 // register. Reference-counted so nested overlays (e.g. the photo tag
 // editor opening on top of the entry form) don't unlock prematurely.
-let modalOpenCount = 0;
-function lockBodyScroll() {
-  modalOpenCount++;
-  document.documentElement.style.overflow = "hidden";
-  document.body.style.overflow = "hidden";
-}
-function unlockBodyScroll() {
-  modalOpenCount = Math.max(0, modalOpenCount - 1);
-  if (modalOpenCount === 0) {
-    document.documentElement.style.overflow = "";
-    document.body.style.overflow = "";
-  }
-}
-
 function init() {
   updateHeaderSub();
   updateFiltersButtonBadge();
@@ -344,7 +335,6 @@ function updateHeaderSub() {
   }
 }
 
-const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 function getEntryYears() {
   return Array.from(new Set(
@@ -586,38 +576,6 @@ function bindFilterSectionEvents() {
 // FEED RENDERING
 // ============================================================
 
-// Parses a "YYYY-MM-DD" string as a LOCAL date, not UTC — avoids the classic
-// off-by-one bug where new Date("2026-11-24") shifts back a day in US timezones.
-function parseLocalDate(dateStr) {
-  if (!dateStr) return new Date(NaN);
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
-}
-
-function calcAge(birthdateStr, atDateStr) {
-  if (!birthdateStr) return "";
-  const birth = parseLocalDate(birthdateStr);
-  const at = parseLocalDate(atDateStr);
-  if (isNaN(birth) || isNaN(at)) return "";
-  let months = (at.getFullYear() - birth.getFullYear()) * 12 + (at.getMonth() - birth.getMonth());
-  if (at.getDate() < birth.getDate()) months--;
-  if (months < 0) return "";
-  if (months < 1) {
-    const days = Math.floor((at - birth) / (1000 * 60 * 60 * 24));
-    return `${days} day${days === 1 ? '' : 's'} old`;
-  }
-  const years = Math.floor(months / 12);
-  const remMonths = months % 12;
-  if (years === 0) return `${remMonths} month${remMonths === 1 ? '' : 's'} old`;
-  return `${years} yr${years === 1 ? '' : 's'}${remMonths ? ', ' + remMonths + ' mo' : ''} old`;
-}
-
-function formatDate(dateStr) {
-  const d = parseLocalDate(dateStr);
-  if (isNaN(d)) return dateStr;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
 function kidsLabel(kidIds) {
   if (!kidIds || kidIds.length === 0) return "";
   return kidIds.map(id => {
@@ -719,20 +677,6 @@ function renderTripCard(tripId) {
         <div class="trip-card-meta">${dateRangeTxt}${dateRangeTxt ? " · " : ""}${tripEntries.length} moment${tripEntries.length === 1 ? "" : "s"}</div>
       </div>
     </div>`;
-}
-
-function formatTripDateRange(startDate, endDate) {
-  if (!startDate) return "";
-  const start = parseLocalDate(startDate);
-  if (isNaN(start)) return "";
-  const startTxt = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  if (!endDate) return startTxt;
-  const end = parseLocalDate(endDate);
-  if (isNaN(end)) return startTxt;
-  if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
-    return `${start.toLocaleDateString('en-US', { month: 'short' })} ${start.getDate()}–${end.getDate()}, ${start.getFullYear()}`;
-  }
-  return `${startTxt} – ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
 // ---- On This Day: resurfaces a random past-years entry from today's date ----
@@ -954,12 +898,6 @@ function renderTagOverlay(photo) {
     html += `<div class="photo-location-pill">📍 ${escapeHtml(photo.location)}</div>`;
   }
   return html;
-}
-
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
 }
 
 function bindCardEvents(root) {
@@ -2700,35 +2638,6 @@ async function saveEntry() {
   }
 }
 
-function getVal(id) {
-  const el = document.getElementById(id);
-  return el ? el.value : "";
-}
-
-function isHeicFile(file) {
-  const type = (file.type || "").toLowerCase();
-  const name = (file.name || "").toLowerCase();
-  // Many Android browsers don't set file.type correctly for HEIC files
-  // picked via the native picker, so the filename extension is checked too.
-  return type.includes("heic") || type.includes("heif") || name.endsWith(".heic") || name.endsWith(".heif");
-}
-
-async function convertHeicIfNeeded(file) {
-  if (!isHeicFile(file)) return file;
-  if (typeof heic2any !== "function") {
-    console.warn("heic2any not loaded — uploading HEIC file as-is, it may not display correctly.");
-    return file;
-  }
-  try {
-    const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
-    // heic2any resolves to a single Blob, or an array of Blobs for multi-image HEIC files (e.g. Live Photos) — use the first.
-    return Array.isArray(converted) ? converted[0] : converted;
-  } catch (err) {
-    console.warn("HEIC conversion failed, uploading original file:", err);
-    return file;
-  }
-}
-
 async function uploadPhotos(files) {
   const results = [];
   for (const rawFile of files) {
@@ -2778,15 +2687,6 @@ function confirmDelete(entryId) {
 // ============================================================
 // TOAST
 // ============================================================
-
-let toastTimer;
-function showToast(msg) {
-  const toast = document.getElementById("toast");
-  toast.textContent = msg;
-  toast.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove("show"), 2200);
-}
 
 // ============================================================
 // GLOBAL EVENTS
