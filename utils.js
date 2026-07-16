@@ -94,15 +94,29 @@ export function showToast(msg) {
 }
 
 let modalOpenCount = 0;
+let savedScrollY = 0;
 export function lockBodyScroll() {
+  if (modalOpenCount === 0) {
+    // Pinning the body via position:fixed (rather than just overflow:hidden)
+    // is what actually prevents mobile Safari/Chrome from silently resetting
+    // scroll to the top when a sheet/lightbox opens and closes.
+    savedScrollY = window.scrollY || window.pageYOffset || 0;
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${savedScrollY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.documentElement.style.overflow = "hidden";
+  }
   modalOpenCount++;
-  document.documentElement.style.overflow = "hidden";
-  document.body.style.overflow = "hidden";
 }
 export function unlockBodyScroll() {
   modalOpenCount = Math.max(0, modalOpenCount - 1);
   if (modalOpenCount === 0) {
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.left = "";
+    document.body.style.right = "";
     document.documentElement.style.overflow = "";
-    document.body.style.overflow = "";
+    window.scrollTo(0, savedScrollY);
   }
 }
