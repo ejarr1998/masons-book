@@ -2,16 +2,15 @@
 // Mason's Book — app.js
 // ============================================================
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
+  collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, orderBy, where, serverTimestamp, getDocs, getDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  getStorage, ref, uploadBytes, getDownloadURL, deleteObject
+  ref, uploadBytes, getDownloadURL, deleteObject
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import {
-  getAuth, signInAnonymously, onAuthStateChanged
+  signInAnonymously, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   MONTH_NAMES, parseLocalDate, calcAge, formatDate, formatTripDateRange,
@@ -19,21 +18,13 @@ import {
   lockBodyScroll, unlockBodyScroll
 } from "./utils.js";
 import { openSlideshow, initSlideshow } from "./slideshow.js";
-
-// ---- Firebase config ----
-const firebaseConfig = {
-  apiKey: "AIzaSyCQEgZO95OgLJdwk04LSj-uC3eSa0Dbv0I",
-  authDomain: "masons-book.firebaseapp.com",
-  projectId: "masons-book",
-  storageBucket: "masons-book.firebasestorage.app",
-  messagingSenderId: "837372077507",
-  appId: "1:837372077507:web:a1e473926d0b0701c2c976"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const storage = getStorage(app);
-const auth = getAuth(app);
+import { state } from "./state.js";
+import { db, storage, auth } from "./firebase.js";
+import {
+  listenToTrips, tripsSummary, tripsSectionBodyHtml, tripChipsInnerHtml,
+  bindTripChipEvents, createNewTripInline, renderTripCard, openTripDetail,
+  renderTripDetail, openTripEditForm, saveTripEdit, confirmDeleteTrip, deleteTrip
+} from "./trips.js";
 
 // ---- Kids list (stored in Firestore /kids collection, managed from the
 // "Manage kids" gear icon in edit mode — no code changes needed to add one) ----
@@ -92,14 +83,11 @@ const FIRST_YEAR_MONTHS = [
 ];
 
 // ---- State ----
-let entries = [];
-let isEditMode = false;
 let activeKidFilter = "all";
 let activeCategoryFilter = "all";
 let activeYearFilter = "all";
 let activeMonthFilter = "all";
 let TAGS = []; // user-created tags, shared via Firestore, e.g. "Doctor Visit", "Grandma's House"
-let TRIPS = []; // trips, shared via Firestore — a lightweight container that groups entries together
 let activeTagFilters = []; // multi-select: entry matches if it has ANY of these tags
 let expandedFilterSections = { people: false, type: false, dates: false };
 let selectedType = null;
@@ -158,15 +146,6 @@ function listenToTags() {
     TAGS = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     renderFeed(); // tag pills on cards depend on TAGS being loaded
   }, (err) => console.error("Tags listen error:", err));
-}
-
-function listenToTrips() {
-  const tripsCol = collection(db, "trips");
-  const q = query(tripsCol, orderBy("startDate", "desc"));
-  onSnapshot(q, (snapshot) => {
-    TRIPS = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderFeed(); // trip cards & the trip picker in the entry form depend on TRIPS
-  }, (err) => console.error("Trips listen error:", err));
 }
 
 function listenToCategoryConfig() {
@@ -230,7 +209,7 @@ let wordmarkTapCount = 0;
 let wordmarkTapTimer = null;
 function bindWordmarkEditTrigger() {
   document.getElementById("wordmark").addEventListener("click", () => {
-    if (isEditMode) return; // already in
+    if (state.isEditMode) return; // already in
     wordmarkTapCount++;
     clearTimeout(wordmarkTapTimer);
     wordmarkTapTimer = setTimeout(() => { wordmarkTapCount = 0; }, 2000);
@@ -247,7 +226,7 @@ function bindWordmarkEditTrigger() {
 }
 
 function enterEditMode() {
-  isEditMode = true;
+  state.isEditMode = true;
   document.getElementById("modeBadge").textContent = "Edit mode";
   document.getElementById("modeBadge").classList.add("edit");
   document.getElementById("fabAddMini").style.display = "flex";
@@ -307,12 +286,12 @@ function listenToEntries() {
   // not just a rule condition, which is what lets Firestore's security
   // rules actually enforce it (rules can't silently filter a query's
   // results; the query itself has to be provably restricted).
-  const q = isEditMode
+  const q = state.isEditMode
     ? query(entriesCol, orderBy("date", "desc"))
     : query(entriesCol, where("isPrivate", "==", false), orderBy("date", "desc"));
 
   unsubscribeEntriesListener = onSnapshot(q, (snapshot) => {
-    entries = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    state.entries = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     updateFiltersButtonBadge();
     renderFeed();
   }, (err) => {
@@ -339,7 +318,7 @@ function updateHeaderSub() {
 
 function getEntryYears() {
   return Array.from(new Set(
-    entries.map(e => parseLocalDate(e.date).getFullYear()).filter(y => !isNaN(y))
+    state.entries.map(e => parseLocalDate(e.date).getFullYear()).filter(y => !isNaN(y))
   )).sort((a, b) => b - a);
 }
 
@@ -387,10 +366,6 @@ function tagsSummary() {
   return `${activeTagFilters.length} tags`;
 }
 
-function tripsSummary() {
-  return TRIPS.length === 0 ? "None yet" : `${TRIPS.length} trip${TRIPS.length === 1 ? "" : "s"}`;
-}
-
 function filterSectionHtml(id, title, summary, bodyHtml) {
   const expanded = !!expandedFilterSections[id];
   return `
@@ -435,7 +410,7 @@ function datesSectionBodyHtml() {
     </div>`;
   if (activeYearFilter !== "all") {
     const monthsWithEntries = Array.from(new Set(
-      entries
+      state.entries
         .map(e => parseLocalDate(e.date))
         .filter(d => !isNaN(d) && d.getFullYear() === activeYearFilter)
         .map(d => d.getMonth())
@@ -457,34 +432,6 @@ function tagsSectionBodyHtml() {
   return `<div class="chip-select">${TAGS.map(t =>
     `<div class="chip ${activeTagFilters.includes(t.id) ? 'selected' : ''}" data-tag-filter-chip="${t.id}">${escapeHtml(tagLabel(t))}</div>`
   ).join("")}</div>`;
-}
-
-function tripsSectionBodyHtml() {
-  if (TRIPS.length === 0) {
-    return `<div style="font-size:13px; color:var(--ink-soft);">No trips yet — create one from the entry form when adding a moment.</div>`;
-  }
-  // TRIPS already arrives sorted most-recent-first from Firestore, so group
-  // consecutively by year rather than re-sorting.
-  const groups = [];
-  let currentYear = null;
-  for (const t of TRIPS) {
-    const d = parseLocalDate(t.startDate);
-    const year = isNaN(d) ? "Unknown date" : d.getFullYear();
-    if (year !== currentYear) {
-      groups.push({ year, trips: [] });
-      currentYear = year;
-    }
-    groups[groups.length - 1].trips.push(t);
-  }
-  return groups.map((g, i) => `
-    <div class="filter-subtle-label" style="margin-top:${i === 0 ? '0' : '14px'};">${g.year}</div>
-    <div class="trip-filter-list">
-      ${g.trips.map(t => `
-        <div class="trip-filter-row" data-trip-filter-chip="${t.id}">
-          <span class="trip-filter-row-title">🧳 ${escapeHtml(t.title)}</span>
-          <span class="trip-filter-row-dates">${escapeHtml(formatTripDateRange(t.startDate, t.endDate))}</span>
-        </div>`).join("")}
-    </div>`).join("");
 }
 
 function renderFiltersSheet() {
@@ -590,7 +537,7 @@ let onThisDayShownIds = new Set(); // ids already surfaced this session, so "Sho
 let onThisDayCurrentId = null; // the entry currently displayed in the widget
 
 function getFilteredEntries() {
-  return entries.filter(e => {
+  return state.entries.filter(e => {
     const kidMatch = activeKidFilter === "all" || (e.kids || []).includes(activeKidFilter);
     const catMatch = activeCategoryFilter === "all" || e.category === activeCategoryFilter;
     const entryDate = parseLocalDate(e.date);
@@ -601,7 +548,7 @@ function getFilteredEntries() {
   });
 }
 
-function renderFeed() {
+export function renderFeed() {
   const feedEl = document.getElementById("feed");
   let filtered = getFilteredEntries();
 
@@ -624,7 +571,7 @@ function renderFeed() {
   }
 
   if (filtered.length === 0) {
-    feedEl.innerHTML = onThisDayHtml + `<div class="feed-empty">Nothing here yet.${isEditMode ? ' Tap + to add the first moment.' : ''}</div>`;
+    feedEl.innerHTML = onThisDayHtml + `<div class="feed-empty">Nothing here yet.${state.isEditMode ? ' Tap + to add the first moment.' : ''}</div>`;
     bindCardEvents(feedEl);
     return;
   }
@@ -648,43 +595,11 @@ function renderFeed() {
   bindCardEvents(feedEl);
 }
 
-function renderTripCard(tripId) {
-  const trip = TRIPS.find(t => t.id === tripId);
-  const tripEntries = entries.filter(e => e.tripId === tripId);
-  const sorted = [...tripEntries].sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date));
-
-  const collagePhotos = [];
-  for (const e of sorted) {
-    if (collagePhotos.length >= 4) break;
-    let url = null;
-    if (e.photos && e.photos.length) url = e.photos[0].url;
-    else if (e.category === "thennow" && e.nowPhoto) url = e.nowPhoto.url;
-    else if (e.category === "pregnancy" && e.subtype === "bump" && e.weeks && e.weeks.length) {
-      url = [...e.weeks].sort((a, b) => b.week - a.week)[0].photo?.url || null;
-    }
-    if (url) collagePhotos.push(url);
-  }
-
-  const dateRangeTxt = trip ? formatTripDateRange(trip.startDate, trip.endDate) : "";
-  return `
-    <div class="card trip-card" data-trip-open="${tripId}">
-      <div class="trip-collage trip-collage-${Math.min(collagePhotos.length, 4)}">
-        ${collagePhotos.map(url => `<div class="trip-collage-tile" style="background-image:url('${url}')"></div>`).join("")}
-        ${collagePhotos.length === 0 ? `<div class="trip-collage-empty">🧳</div>` : ""}
-      </div>
-      <div class="trip-card-body">
-        <div class="trip-card-title">🧳 ${escapeHtml(trip ? trip.title : "Trip")}</div>
-        ${trip && trip.location ? `<div class="trip-card-location">📍 ${escapeHtml(trip.location)}</div>` : ""}
-        <div class="trip-card-meta">${dateRangeTxt}${dateRangeTxt ? " · " : ""}${tripEntries.length} moment${tripEntries.length === 1 ? "" : "s"}</div>
-      </div>
-    </div>`;
-}
-
 // ---- On This Day: resurfaces a random past-years entry from today's date ----
 
 function computeOnThisDayPool() {
   const today = new Date();
-  return entries.filter(e => {
+  return state.entries.filter(e => {
     const d = parseLocalDate(e.date);
     if (isNaN(d)) return false;
     if (d.getMonth() !== today.getMonth() || d.getDate() !== today.getDate()) return false;
@@ -722,10 +637,10 @@ function renderOnThisDayWidgetHtml(entry, poolSize) {
     </div>`;
 }
 
-function renderCard(e) {
+export function renderCard(e) {
   const cat = CATEGORIES[e.category] || CATEGORIES.photo;
   const kidsTxt = kidsLabel(e.kids);
-  const editControls = isEditMode ? `
+  const editControls = state.isEditMode ? `
     <div class="card-edit-controls">
       <button class="icon-btn" data-edit="${e.id}">✎</button>
       <button class="icon-btn danger" data-delete="${e.id}">🗑</button>
@@ -901,12 +816,12 @@ function renderTagOverlay(photo) {
   return html;
 }
 
-function bindCardEvents(root) {
+export function bindCardEvents(root) {
   root.querySelectorAll("[data-lightbox]").forEach(img => {
     img.addEventListener("click", () => {
       const entryId = img.dataset.lightbox;
       const idx = parseInt(img.dataset.idx, 10);
-      const entry = entries.find(e => e.id === entryId);
+      const entry = state.entries.find(e => e.id === entryId);
       openLightbox(entry.photos, idx, entry.caption || "");
     });
   });
@@ -914,7 +829,7 @@ function bindCardEvents(root) {
     thumb.addEventListener("click", () => {
       const entryId = thumb.dataset.bumpEntry;
       const idx = parseInt(thumb.dataset.bumpIdx, 10);
-      const entry = entries.find(e => e.id === entryId);
+      const entry = state.entries.find(e => e.id === entryId);
       const sortedWeeks = [...entry.weeks].sort((a, b) => a.week - b.week);
       const photosWithCaptions = sortedWeeks.map(w => ({ ...w.photo, caption: `Week ${w.week}` }));
       openLightbox(photosWithCaptions, idx, "");
@@ -943,7 +858,7 @@ function bindCardEvents(root) {
       bindCardEvents(document.getElementById("onThisDayWrap"));
     });
   }
-  if (isEditMode) {
+  if (state.isEditMode) {
     root.querySelectorAll("[data-edit]").forEach(btn => {
       btn.addEventListener("click", () => openEditSheet(btn.dataset.edit));
     });
@@ -1001,7 +916,7 @@ function initThenNowSliders(root) {
 function initFirstYearScrubbers(root) {
   root.querySelectorAll(".firstyear-scrubber").forEach(scrubber => {
     const entryId = scrubber.dataset.firstyearEntry;
-    const entry = entries.find(en => en.id === entryId);
+    const entry = state.entries.find(en => en.id === entryId);
     const months = entry && entry.months ? [...entry.months].sort((a, b) => a.monthIndex - b.monthIndex) : [];
     if (months.length === 0) return;
 
@@ -1232,7 +1147,7 @@ function openAddSheet() {
 }
 
 function openEditSheet(entryId) {
-  const entry = entries.find(e => e.id === entryId);
+  const entry = state.entries.find(e => e.id === entryId);
   if (!entry) return;
   editingEntryId = entryId;
   selectedType = entry.category;
@@ -1256,7 +1171,7 @@ function openEditSheet(entryId) {
   lockBodyScroll();
 }
 
-function closeAddSheet() {
+export function closeAddSheet() {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   document.getElementById("addSheetOverlay").classList.remove("open");
   unlockBodyScroll();
@@ -1310,73 +1225,6 @@ function renderTypePicker() {
 
 function tagLabel(t) {
   return t.isPrivate ? `🔒 ${t.name}` : t.name;
-}
-
-function tripChipsInnerHtml(selectedTripId, expanded) {
-  // Auto-expand if the entry being edited is tagged to a trip that wouldn't
-  // otherwise be visible in the collapsed (2-most-recent) view.
-  const shouldExpand = expanded || (selectedTripId && !TRIPS.slice(0, 2).some(t => t.id === selectedTripId));
-  const visibleTrips = shouldExpand ? TRIPS : TRIPS.slice(0, 2);
-  const hiddenCount = TRIPS.length - visibleTrips.length;
-  return `
-    ${visibleTrips.map(t => `<div class="chip ${selectedTripId === t.id ? 'selected' : ''}" data-trip="${t.id}">🧳 ${escapeHtml(t.title)}</div>`).join("")}
-    ${hiddenCount > 0 ? `<div class="chip" id="showMoreTripsChip">Show ${hiddenCount} more…</div>` : ""}
-    <div class="chip" id="newTripChip">+ New Trip</div>`;
-}
-
-function bindTripChipEvents() {
-  const container = document.getElementById("tripChips");
-  container.querySelectorAll(".chip[data-trip]").forEach(chip => {
-    chip.addEventListener("click", () => {
-      // Single-select: picking one deselects the rest; tapping the already-
-      // selected one again unassigns the entry from any trip.
-      const wasSelected = chip.classList.contains("selected");
-      container.querySelectorAll(".chip[data-trip]").forEach(c => c.classList.remove("selected"));
-      if (!wasSelected) chip.classList.add("selected");
-    });
-  });
-  const showMoreChip = document.getElementById("showMoreTripsChip");
-  if (showMoreChip) {
-    showMoreChip.addEventListener("click", () => {
-      const currentlySelected = container.querySelector(".chip.selected[data-trip]");
-      container.innerHTML = tripChipsInnerHtml(currentlySelected ? currentlySelected.dataset.trip : null, true);
-      bindTripChipEvents();
-    });
-  }
-  const newTripChip = document.getElementById("newTripChip");
-  newTripChip.addEventListener("click", () => {
-    const formEl = document.getElementById("newTripForm");
-    formEl.style.display = formEl.style.display === "none" ? "block" : "none";
-  });
-}
-
-async function createNewTripInline() {
-  const title = getVal("fNewTripTitle").trim();
-  if (!title) { showToast("Enter a trip title first"); return; }
-  const location = getVal("fNewTripLocation").trim();
-  const startDate = getVal("fNewTripStart");
-  if (!startDate) { showToast("Pick a start date first"); return; }
-  const endDate = getVal("fNewTripEnd");
-
-  const btn = document.getElementById("createTripBtn");
-  btn.disabled = true;
-  btn.textContent = "Creating...";
-  try {
-    const docRef = await addDoc(collection(db, "trips"), {
-      title, location: location || null, startDate, endDate: endDate || null, createdAt: serverTimestamp()
-    });
-    TRIPS.unshift({ id: docRef.id, title, location: location || null, startDate, endDate: endDate || null });
-    document.getElementById("tripChips").innerHTML = tripChipsInnerHtml(docRef.id, true);
-    bindTripChipEvents();
-    document.getElementById("newTripForm").style.display = "none";
-    showToast(`"${title}" created`);
-  } catch (err) {
-    console.error("Create trip error:", err);
-    showToast("Couldn't create trip — try again");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Create trip";
-  }
 }
 
 async function addNewTagInline() {
@@ -2572,110 +2420,6 @@ async function toggleCategoryHidden(id) {
   }
 }
 
-function openTripDetail(tripId) {
-  renderTripDetail(tripId);
-  document.getElementById("addSheetOverlay").classList.add("open");
-  lockBodyScroll();
-}
-
-function renderTripDetail(tripId) {
-  const content = document.getElementById("addSheetContent");
-  const trip = TRIPS.find(t => t.id === tripId);
-  // Oldest-first here (unlike the main feed) — reads like a proper recap:
-  // arrived, then this happened, then that, rather than newest-first.
-  const tripEntries = entries.filter(e => e.tripId === tripId)
-    .sort((a, b) => parseLocalDate(a.date) - parseLocalDate(b.date));
-  const dateRangeTxt = trip ? formatTripDateRange(trip.startDate, trip.endDate) : "";
-
-  content.innerHTML = `
-    <div class="trip-detail-header">
-      <div class="sheet-title" style="margin-bottom:2px;">🧳 ${escapeHtml(trip ? trip.title : "Trip")}</div>
-      ${trip && trip.location ? `<div class="trip-detail-location">📍 ${escapeHtml(trip.location)}</div>` : ""}
-      <div class="trip-detail-meta">${dateRangeTxt}${dateRangeTxt ? " · " : ""}${tripEntries.length} moment${tripEntries.length === 1 ? "" : "s"}</div>
-      <button type="button" class="btn-secondary" id="playTripSlideshowBtn" style="width:auto; padding:7px 14px; margin-top:0;">▶ Play this trip</button>
-      ${isEditMode ? `
-        <div class="trip-detail-actions">
-          <button type="button" class="btn-secondary" id="editTripBtn" style="width:auto; padding:7px 14px; margin-top:0;">✎ Edit trip</button>
-          <button type="button" class="btn-secondary danger" id="deleteTripBtn" style="width:auto; padding:7px 14px; margin-top:0;">🗑 Delete trip</button>
-        </div>` : ""}
-    </div>
-    <div class="trip-detail-feed">
-      ${tripEntries.length ? tripEntries.map(e => renderCard(e)).join("") : `<div class="feed-empty">No moments in this trip yet.</div>`}
-    </div>
-    <button class="btn-secondary" id="closeTripDetailBtn">Close</button>
-  `;
-
-  bindCardEvents(content); // lightbox / bump / thennow / edit / delete all work the same in here
-  document.getElementById("closeTripDetailBtn").addEventListener("click", closeAddSheet);
-  document.getElementById("playTripSlideshowBtn").addEventListener("click", () => openSlideshow(tripEntries));
-  if (isEditMode) {
-    document.getElementById("editTripBtn").addEventListener("click", () => openTripEditForm(tripId));
-    document.getElementById("deleteTripBtn").addEventListener("click", () => confirmDeleteTrip(tripId));
-  }
-}
-
-function openTripEditForm(tripId) {
-  const trip = TRIPS.find(t => t.id === tripId);
-  if (!trip) return;
-  const content = document.getElementById("addSheetContent");
-  content.innerHTML = `
-    <div class="sheet-title">✎ Edit trip</div>
-    <div class="field"><label>Trip title</label><input type="text" id="fEditTripTitle" value="${escapeHtml(trip.title || "")}"></div>
-    <div class="field"><label>Location (optional)</label><input type="text" id="fEditTripLocation" value="${escapeHtml(trip.location || "")}"></div>
-    <div class="field-row">
-      <div class="field"><label>Start date</label><input type="date" id="fEditTripStart" value="${trip.startDate || ""}"></div>
-      <div class="field"><label>End date (optional)</label><input type="date" id="fEditTripEnd" value="${trip.endDate || ""}"></div>
-    </div>
-    <button class="btn-primary" id="saveTripEditBtn">Save</button>
-    <button class="btn-secondary" id="cancelTripEditBtn">Cancel</button>
-  `;
-  document.getElementById("saveTripEditBtn").addEventListener("click", () => saveTripEdit(tripId));
-  document.getElementById("cancelTripEditBtn").addEventListener("click", () => renderTripDetail(tripId));
-}
-
-async function saveTripEdit(tripId) {
-  const title = getVal("fEditTripTitle").trim();
-  if (!title) { showToast("Enter a trip title first"); return; }
-  const location = getVal("fEditTripLocation").trim();
-  const startDate = getVal("fEditTripStart");
-  if (!startDate) { showToast("Pick a start date first"); return; }
-  const endDate = getVal("fEditTripEnd");
-
-  const btn = document.getElementById("saveTripEditBtn");
-  btn.disabled = true;
-  btn.textContent = "Saving...";
-  try {
-    await updateDoc(doc(db, "trips", tripId), { title, location: location || null, startDate, endDate: endDate || null });
-    showToast("Trip updated");
-    renderTripDetail(tripId);
-  } catch (err) {
-    console.error("Edit trip error:", err);
-    showToast("Couldn't save — try again");
-    btn.disabled = false;
-    btn.textContent = "Save";
-  }
-}
-
-function confirmDeleteTrip(tripId) {
-  const trip = TRIPS.find(t => t.id === tripId);
-  if (confirm(`Delete "${trip ? trip.title : 'this trip'}"? Its entries are kept — they'll just no longer be grouped together.`)) {
-    deleteTrip(tripId);
-  }
-}
-
-async function deleteTrip(tripId) {
-  try {
-    const tripEntries = entries.filter(e => e.tripId === tripId);
-    await Promise.all(tripEntries.map(e => updateDoc(doc(db, "entries", e.id), { tripId: null })));
-    await deleteDoc(doc(db, "trips", tripId));
-    showToast("Trip deleted");
-    closeAddSheet();
-  } catch (err) {
-    console.error("Delete trip error:", err);
-    showToast("Couldn't delete — try again");
-  }
-}
-
 function openManageKidsSheet() {
   renderManageKids();
   document.getElementById("addSheetOverlay").classList.add("open");
@@ -2746,7 +2490,7 @@ function bindGlobalEvents() {
     // Viewers (not in edit mode) only ever have one option — Filters — so
     // skip the menu entirely and jump straight there. The speed-dial menu
     // only makes sense once there's a second option (Add Entry) to choose from.
-    if (!isEditMode) {
+    if (!state.isEditMode) {
       openFiltersSheet();
       return;
     }
