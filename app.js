@@ -13,7 +13,7 @@ import {
   signInAnonymously, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  MONTH_NAMES, parseLocalDate, calcAge, formatDate, formatTripDateRange,
+  MONTH_NAMES, parseLocalDate, calcAge, formatDate, formatTripDateRange, computeBirthdayNumber,
   escapeHtml, getVal, isHeicFile, convertHeicIfNeeded, showToast,
   lockBodyScroll, unlockBodyScroll
 } from "./utils.js";
@@ -578,14 +578,21 @@ export function renderFeed() {
 
   // Entries that belong to a trip don't render individually — they collapse
   // into one Trip card (at the position of the trip's most recent matching
-  // entry, since `filtered` is already sorted newest-first).
+  // entry, since `filtered` is already sorted newest-first). Birthday entries
+  // get the same treatment, grouped per kid into one scrubbable timeline.
   const seenTrips = new Set();
+  const seenBirthdayKids = new Set();
   const cardsHtml = [];
   for (const e of filtered) {
     if (e.tripId) {
       if (seenTrips.has(e.tripId)) continue;
       seenTrips.add(e.tripId);
       cardsHtml.push(renderTripCard(e.tripId));
+    } else if (e.category === "birthday" && e.kids && e.kids.length) {
+      const kidId = e.kids[0];
+      if (seenBirthdayKids.has(kidId)) continue;
+      seenBirthdayKids.add(kidId);
+      cardsHtml.push(renderBirthdayScrubberCard(kidId));
     } else {
       cardsHtml.push(renderCard(e));
     }
@@ -593,6 +600,39 @@ export function renderFeed() {
 
   feedEl.innerHTML = onThisDayHtml + cardsHtml.join("");
   bindCardEvents(feedEl);
+}
+
+function renderBirthdayScrubberCard(kidId) {
+  const kid = KIDS.find(k => k.id === kidId);
+  const birthdayEntries = state.entries
+    .filter(e => e.category === "birthday" && e.kids && e.kids[0] === kidId)
+    .sort((a, b) => (parseInt(a.birthdayNum, 10) || 0) - (parseInt(b.birthdayNum, 10) || 0));
+  if (birthdayEntries.length === 0) return "";
+
+  return `
+    <div class="card birthday-card">
+      <div class="card-body">
+        <div class="card-title">🎂 ${escapeHtml(kid ? kid.name : "")}'s Birthdays</div>
+        <div class="birthday-scrubber" data-birthday-kid="${kidId}">
+          <div class="birthday-stage">
+            <img class="birthday-img" id="birthdayImgA-${kidId}" alt="">
+            <img class="birthday-img" id="birthdayImgB-${kidId}" alt="">
+            <div class="birthday-tap-zone left" id="birthdayTapPrev-${kidId}"></div>
+            <div class="birthday-tap-zone center" id="birthdayTapView-${kidId}"></div>
+            <div class="birthday-tap-zone right" id="birthdayTapNext-${kidId}"></div>
+            ${state.isEditMode ? `
+              <div class="card-edit-controls birthday-edit-controls">
+                <button class="icon-btn" id="birthdayEditBtn-${kidId}" data-edit="">✎</button>
+                <button class="icon-btn danger" id="birthdayDeleteBtn-${kidId}" data-delete="">🗑</button>
+              </div>` : ""}
+          </div>
+          <div class="birthday-caption" id="birthdayCaption-${kidId}"></div>
+          <div class="birthday-track" id="birthdayTrack-${kidId}">
+            ${birthdayEntries.map(e => `<div class="birthday-tick has-photo" data-tick-num="${e.birthdayNum || ''}" title="Birthday #${e.birthdayNum || '?'}"></div>`).join("")}
+          </div>
+        </div>
+      </div>
+    </div>`;
 }
 
 // ---- On This Day: resurfaces a random past-years entry from today's date ----
@@ -702,7 +742,7 @@ export function renderCard(e) {
               </div>`;
       break;
     case "birthday":
-      body = `<div class="card-title">${e.birthdayNum ? `Birthday #${escapeHtml(e.birthdayNum)}` : "Birthday"}${e.theme ? `: ${escapeHtml(e.theme)}` : ""}</div>
+      body = `<div class="card-title">${e.birthdayNum ? `🎉 Turned ${escapeHtml(e.birthdayNum)}` : "🎂 Birthday"}${e.theme ? ` · ${escapeHtml(e.theme)}` : ""}</div>
               ${e.note ? `<p class="card-text">${escapeHtml(e.note)}</p>` : ""}`;
       break;
     case "letter":
@@ -849,6 +889,7 @@ export function bindCardEvents(root) {
   });
   initThenNowSliders(root);
   initFirstYearScrubbers(root);
+  initBirthdayScrubbers(root);
   const shuffleBtn = root.querySelector("#onThisDayShuffleBtn");
   if (shuffleBtn) {
     shuffleBtn.addEventListener("click", () => {
@@ -997,6 +1038,90 @@ function initFirstYearScrubbers(root) {
     });
 
     showMonth(0);
+  });
+}
+
+function initBirthdayScrubbers(root) {
+  root.querySelectorAll(".birthday-scrubber").forEach(scrubber => {
+    const kidId = scrubber.dataset.birthdayKid;
+    const birthdayEntries = state.entries
+      .filter(e => e.category === "birthday" && e.kids && e.kids[0] === kidId)
+      .sort((a, b) => (parseInt(a.birthdayNum, 10) || 0) - (parseInt(b.birthdayNum, 10) || 0));
+    if (birthdayEntries.length === 0) return;
+
+    const imgA = document.getElementById(`birthdayImgA-${kidId}`);
+    const imgB = document.getElementById(`birthdayImgB-${kidId}`);
+    const captionEl = document.getElementById(`birthdayCaption-${kidId}`);
+    const track = document.getElementById(`birthdayTrack-${kidId}`);
+    const editBtn = document.getElementById(`birthdayEditBtn-${kidId}`);
+    const deleteBtn = document.getElementById(`birthdayDeleteBtn-${kidId}`);
+
+    let activeLayer = "a";
+    let pos = 0; // index into birthdayEntries
+
+    function showBirthday(newPos) {
+      pos = newPos;
+      const entry = birthdayEntries[pos];
+      const coverUrl = entry.photos && entry.photos.length ? entry.photos[0].url : "";
+      const showEl = activeLayer === "a" ? imgB : imgA;
+      const hideEl = activeLayer === "a" ? imgA : imgB;
+      if (coverUrl) {
+        showEl.src = coverUrl;
+        showEl.classList.add("active");
+      }
+      hideEl.classList.remove("active");
+      activeLayer = activeLayer === "a" ? "b" : "a";
+
+      const turnedTxt = entry.birthdayNum ? `🎉 Turned ${entry.birthdayNum}` : "🎉 Birthday";
+      captionEl.textContent = entry.theme ? `${turnedTxt} · ${entry.theme}` : turnedTxt;
+
+      track.querySelectorAll(".birthday-tick").forEach(t => {
+        t.classList.toggle("current", t.dataset.tickNum === String(entry.birthdayNum || ""));
+      });
+      // Edit/delete always act on whichever birthday is currently displayed.
+      if (editBtn) editBtn.dataset.edit = entry.id;
+      if (deleteBtn) deleteBtn.dataset.delete = entry.id;
+    }
+
+    function snapToClientX(clientX) {
+      const rect = track.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const newPos = Math.min(birthdayEntries.length - 1, Math.round(pct * (birthdayEntries.length - 1)));
+      if (newPos !== pos) showBirthday(newPos);
+    }
+
+    let dragging = false;
+    track.addEventListener("pointerdown", (ev) => {
+      dragging = true;
+      track.setPointerCapture(ev.pointerId);
+      snapToClientX(ev.clientX);
+      ev.stopPropagation();
+    });
+    track.addEventListener("pointermove", (ev) => {
+      if (!dragging) return;
+      snapToClientX(ev.clientX);
+    });
+    track.addEventListener("pointerup", (ev) => {
+      dragging = false;
+      track.releasePointerCapture(ev.pointerId);
+    });
+    track.addEventListener("pointercancel", () => { dragging = false; });
+
+    // Tap left/right to step to the adjacent birthday (clamped, not looping).
+    // Tap center to open every photo from that birthday in the lightbox.
+    document.getElementById(`birthdayTapPrev-${kidId}`).addEventListener("click", () => {
+      if (pos > 0) showBirthday(pos - 1);
+    });
+    document.getElementById(`birthdayTapNext-${kidId}`).addEventListener("click", () => {
+      if (pos < birthdayEntries.length - 1) showBirthday(pos + 1);
+    });
+    document.getElementById(`birthdayTapView-${kidId}`).addEventListener("click", () => {
+      const entry = birthdayEntries[pos];
+      if (!entry.photos || !entry.photos.length) return;
+      openLightbox(entry.photos, 0, entry.note || entry.theme || "");
+    });
+
+    showBirthday(0);
   });
 }
 
@@ -1377,7 +1502,7 @@ function renderEntryForm(existing) {
     case "birthday":
       typeFields = `
         <div class="field-row">
-          <div class="field"><label>Birthday #</label><input type="number" id="fBirthdayNum" min="1" max="18" value="${existing ? existing.birthdayNum || "" : ""}"></div>
+          <div class="field"><label>Birthday #</label><input type="number" id="fBirthdayNum" min="1" max="18" placeholder="Auto" value="${existing ? existing.birthdayNum || "" : ""}"></div>
           <div class="field"><label>Theme</label><input type="text" id="fTheme" placeholder="e.g. Dinosaurs" value="${existing ? escapeHtml(existing.theme || "") : ""}"></div>
         </div>
         <div class="field"><label>Note (optional)</label><textarea id="fNote">${existing ? existing.note || "" : ""}</textarea></div>
@@ -1476,6 +1601,26 @@ function renderEntryForm(existing) {
   content.querySelectorAll("#kidChips .chip").forEach(chip => {
     chip.addEventListener("click", () => chip.classList.toggle("selected"));
   });
+
+  // Birthday #: auto-suggest from the kid's stored birthdate + this entry's
+  // date, so it's not manual guesswork — but never overwrite a value that's
+  // already there (existing entry, or something the person already typed).
+  if (selectedType === "birthday") {
+    const numInput = document.getElementById("fBirthdayNum");
+    const suggestBirthdayNumber = () => {
+      if (numInput.value.trim() !== "") return;
+      const kidId = document.querySelector("#kidChips .chip.selected")?.dataset.kid;
+      const kid = KIDS.find(k => k.id === kidId);
+      if (!kid || !kid.birthdate) return;
+      const suggested = computeBirthdayNumber(kid.birthdate, document.getElementById("fDate").value);
+      if (suggested) numInput.value = suggested;
+    };
+    content.querySelectorAll("#kidChips .chip").forEach(chip => {
+      chip.addEventListener("click", suggestBirthdayNumber);
+    });
+    document.getElementById("fDate").addEventListener("change", suggestBirthdayNumber);
+    suggestBirthdayNumber(); // covers the case where a kid is already pre-selected
+  }
 
   // Tag chip toggling + inline new-tag creation
   content.querySelectorAll("#tagChips .chip").forEach(chip => {
