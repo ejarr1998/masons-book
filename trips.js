@@ -175,11 +175,11 @@ export function renderTripDetail(tripId) {
       <div class="sheet-title" style="margin-bottom:2px;">🧳 ${escapeHtml(trip ? trip.title : "Trip")}</div>
       ${trip && trip.location ? `<div class="trip-detail-location">📍 ${escapeHtml(trip.location)}</div>` : ""}
       <div class="trip-detail-meta">${dateRangeTxt}${dateRangeTxt ? " · " : ""}${tripEntries.length} moment${tripEntries.length === 1 ? "" : "s"}</div>
-      <button type="button" class="btn-secondary" id="playTripSlideshowBtn" style="width:auto; padding:7px 14px; margin-top:0;">▶ Play this trip</button>
+      <button type="button" class="btn-secondary" id="playTripSlideshowBtn">▶ Play this trip</button>
       ${state.isEditMode ? `
         <div class="trip-detail-actions">
-          <button type="button" class="btn-secondary" id="editTripBtn" style="width:auto; padding:7px 14px; margin-top:0;">✎ Edit trip</button>
-          <button type="button" class="btn-secondary danger" id="deleteTripBtn" style="width:auto; padding:7px 14px; margin-top:0;">🗑 Delete trip</button>
+          <button type="button" class="btn-secondary" id="editTripBtn">✎ Edit trip</button>
+          <button type="button" class="btn-secondary danger" id="deleteTripBtn">🗑 Delete trip</button>
         </div>` : ""}
     </div>
     <div class="trip-detail-feed">
