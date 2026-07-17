@@ -40,6 +40,8 @@ input, textarea, select{ font-family: inherit; }
   display:flex;
   align-items:center;
   justify-content:space-between;
+  flex-wrap:wrap; /* narrow phones: action group drops below the title instead of squeezing it */
+  row-gap:10px;
   border-bottom: 1px solid var(--taupe);
   position: sticky;
   top:0;
@@ -68,6 +70,8 @@ input, textarea, select{ font-family: inherit; }
   border-radius: 100px;
   background: var(--taupe);
   color: var(--ink-soft);
+  white-space:nowrap; /* never let "Edit mode" wrap into a tall two-line pill */
+  flex-shrink:0;
 }
 .mode-badge.edit{ background: var(--rust); color: #fff; }
 
