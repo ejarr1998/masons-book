@@ -3200,6 +3200,7 @@ function renderManageKids(showAddForm) {
             <div style="font-weight:700; font-size:14px;">${escapeHtml(k.name)}</div>
             <div style="font-size:12px; color:var(--ink-soft);">${k.birthdate ? formatDate(k.birthdate) : "No birthdate set"}</div>
           </div>
+          <button type="button" class="icon-btn danger" data-delete-kid="${k.id}" aria-label="Delete ${escapeHtml(k.name)}" title="Delete child">${icon("trash")}</button>
         </div>`).join("")}
     </div>
     ${showAddForm ? `
@@ -3212,6 +3213,10 @@ function renderManageKids(showAddForm) {
       <button class="btn-secondary" id="closeManageKidsBtn">Close</button>
     `}
   `;
+
+  content.querySelectorAll("[data-delete-kid]").forEach(btn => {
+    btn.addEventListener("click", () => renderDeleteKidStep1(btn.dataset.deleteKid));
+  });
 
   if (showAddForm) {
     document.getElementById("saveKidBtn").addEventListener("click", saveNewKid);
@@ -3241,6 +3246,142 @@ async function saveNewKid() {
   } finally {
     btn.disabled = false;
     btn.textContent = "Save child";
+  }
+}
+
+// ============================================================
+// DELETE A CHILD — a rare but real need (a miscarriage, a name change
+// before birth, a corrected sex-of-baby guess). Because this is permanent
+// and emotionally loaded, it's gated behind three distinct steps rather
+// than a single confirm() dialog, ending with typing the child's name.
+// ============================================================
+
+// Entries that mention this kid alongside others (shared family photos,
+// group moments) — this kid's tag is removed but the entry and its photos
+// stay, since the memory itself still belongs to the sibling(s) in it.
+function kidSharedEntries(kidId) {
+  return state.entries.filter(e => (e.kids || []).includes(kidId) && e.kids.length > 1);
+}
+
+// Entries that exist only because of this kid (their birthdays, first year,
+// bump progression tied to this pregnancy, letters addressed to them, solo
+// photos, etc.) — these are deleted entirely, photos included.
+function kidExclusiveEntries(kidId) {
+  return state.entries.filter(e => (e.kids || []).length === 1 && e.kids[0] === kidId);
+}
+
+function renderDeleteKidStep1(kidId) {
+  const kid = KIDS.find(k => k.id === kidId);
+  if (!kid) return;
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">Delete ${escapeHtml(kid.name)}?</div>
+    <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">
+      This permanently removes ${escapeHtml(kid.name)} from The Jarrett Book — their profile, birthdate,
+      and every entry created just for them (birthdays, milestones, letters, photos). This can't be
+      undone once it's done. If this is a hard moment, take your time — there's no rush.
+    </p>
+    <button class="btn-secondary danger" id="deleteKidNextBtn">Continue</button>
+    <button class="btn-secondary" id="deleteKidCancelBtn">Cancel</button>
+  `;
+  document.getElementById("deleteKidNextBtn").addEventListener("click", () => renderDeleteKidStep2(kidId));
+  document.getElementById("deleteKidCancelBtn").addEventListener("click", () => renderManageKids(false));
+}
+
+function renderDeleteKidStep2(kidId) {
+  const kid = KIDS.find(k => k.id === kidId);
+  if (!kid) return;
+  const exclusive = kidExclusiveEntries(kidId);
+  const shared = kidSharedEntries(kidId);
+  const photoCount = exclusive.reduce((sum, e) => sum + collectEntryPhotoPaths(e).length, 0);
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">Here's exactly what goes</div>
+    <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:10px;">
+      <strong>Permanently deleted:</strong> ${exclusive.length} ${exclusive.length === 1 ? "entry" : "entries"}
+      belonging only to ${escapeHtml(kid.name)}${photoCount > 0 ? `, including ${photoCount} ${photoCount === 1 ? "photo" : "photos"}` : ""}.
+    </p>
+    ${shared.length > 0 ? `
+      <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">
+        <strong>Kept, but unlinked:</strong> ${shared.length} shared ${shared.length === 1 ? "entry" : "entries"}
+        (like family photos with siblings) will stay in the book — ${escapeHtml(kid.name)}'s name is just removed from them.
+      </p>
+    ` : `<p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">There are no shared entries with other kids to worry about.</p>`}
+    <p style="font-size:13px; font-weight:700; color:var(--danger); margin-bottom:14px;">
+      There is no way to undo this or recover the deleted entries and photos afterward.
+    </p>
+    <button class="btn-secondary danger" id="deleteKidNextBtn">I understand, continue</button>
+    <button class="btn-secondary" id="deleteKidBackBtn">Go back</button>
+  `;
+  document.getElementById("deleteKidNextBtn").addEventListener("click", () => renderDeleteKidStep3(kidId));
+  document.getElementById("deleteKidBackBtn").addEventListener("click", () => renderDeleteKidStep1(kidId));
+}
+
+function renderDeleteKidStep3(kidId) {
+  const kid = KIDS.find(k => k.id === kidId);
+  if (!kid) return;
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">Last step</div>
+    <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:14px;">
+      To confirm, type <strong>${escapeHtml(kid.name)}</strong> exactly as shown below.
+    </p>
+    <div class="field"><input type="text" id="fDeleteKidConfirmName" placeholder="Type the name here" autocomplete="off"></div>
+    <button class="btn-primary danger" id="deleteKidFinalBtn" disabled>Delete ${escapeHtml(kid.name)} forever</button>
+    <button class="btn-secondary" id="deleteKidBackBtn">Go back</button>
+  `;
+  const input = document.getElementById("fDeleteKidConfirmName");
+  const finalBtn = document.getElementById("deleteKidFinalBtn");
+  input.addEventListener("input", () => {
+    finalBtn.disabled = input.value !== kid.name;
+  });
+  finalBtn.addEventListener("click", async () => {
+    if (input.value !== kid.name) return;
+    finalBtn.disabled = true;
+    finalBtn.textContent = "Deleting...";
+    try {
+      await deleteKidCascade(kidId);
+      showToast(`${kid.name} has been removed`);
+      renderManageKids(false);
+      renderFeed();
+    } catch (err) {
+      console.error("Delete kid error:", err);
+      showToast("Couldn't delete — try again");
+      finalBtn.disabled = false;
+      finalBtn.textContent = `Delete ${kid.name} forever`;
+    }
+  });
+  document.getElementById("deleteKidBackBtn").addEventListener("click", () => renderDeleteKidStep2(kidId));
+}
+
+async function deleteKidCascade(kidId) {
+  const exclusive = kidExclusiveEntries(kidId);
+  const shared = kidSharedEntries(kidId);
+
+  // Delete entries that existed only for this kid, photos included.
+  for (const entry of exclusive) {
+    const photoPaths = collectEntryPhotoPaths(entry);
+    await deleteDoc(doc(db, "entries", entry.id));
+    if (photoPaths.length > 0) {
+      await Promise.all(photoPaths.map(path =>
+        deleteObject(ref(storage, path)).catch(err => console.warn("Storage cleanup skipped for", path, err))
+      ));
+    }
+  }
+
+  // Unlink (not delete) shared entries — the memory still belongs to whoever else is in it.
+  await Promise.all(shared.map(e =>
+    updateDoc(doc(db, "entries", e.id), { kids: e.kids.filter(id => id !== kidId) })
+  ));
+
+  // Finally, remove the child's own profile doc.
+  await deleteDoc(doc(db, "kids", kidId));
+
+  // If the feed was filtered to this kid, that filter no longer means anything.
+  if (activeKidFilter === kidId) {
+    activeKidFilter = "all";
+    updateHeaderSub();
+    updateFiltersButtonBadge();
   }
 }
 

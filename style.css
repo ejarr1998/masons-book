@@ -924,6 +924,7 @@ input, textarea, select{ font-family: inherit; }
   background: var(--rust); color:#fff; font-weight:700; font-size:15px; cursor:pointer; margin-top:6px;
 }
 .btn-primary:disabled{ opacity:0.5; }
+.btn-primary.danger{ background: var(--danger); }
 .btn-secondary{
   width:100%; padding: 12px; border-radius: 14px; border:1px solid var(--taupe);
   background: transparent; color: var(--ink-soft); font-weight:600; font-size:13px; cursor:pointer; margin-top:8px;
