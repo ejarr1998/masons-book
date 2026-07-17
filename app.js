@@ -1117,12 +1117,96 @@ function initBirthdayScrubbers(root) {
     });
     document.getElementById(`birthdayTapView-${kidId}`).addEventListener("click", () => {
       const entry = birthdayEntries[pos];
-      if (!entry.photos || !entry.photos.length) return;
-      openLightbox(entry.photos, 0, entry.note || entry.theme || "");
+      openBirthdayRecap(kidId, entry.birthdayNum);
     });
 
     showBirthday(0);
   });
+}
+
+// ---- Birthday Recap: the immersive, one-birthday-at-a-time detail view ----
+
+function openBirthdayRecap(kidId, birthdayNum) {
+  renderBirthdayRecap(kidId, birthdayNum);
+  document.getElementById("addSheetOverlay").classList.add("open");
+  lockBodyScroll();
+}
+
+function renderBirthdayRecap(kidId, birthdayNum) {
+  const content = document.getElementById("addSheetContent");
+  const kid = KIDS.find(k => k.id === kidId);
+  const birthdayEntries = state.entries
+    .filter(e => e.category === "birthday" && e.kids && e.kids[0] === kidId)
+    .sort((a, b) => (parseInt(a.birthdayNum, 10) || 0) - (parseInt(b.birthdayNum, 10) || 0));
+  const idx = birthdayEntries.findIndex(e => String(e.birthdayNum) === String(birthdayNum));
+  const entry = idx >= 0 ? birthdayEntries[idx] : birthdayEntries[0];
+  if (!entry) { closeAddSheet(); return; }
+
+  const photos = entry.photos || [];
+  const coverUrl = photos.length ? photos[0].url : "";
+  const hasPrev = idx > 0;
+  const hasNext = idx >= 0 && idx < birthdayEntries.length - 1;
+
+  content.innerHTML = `
+    <div class="birthday-recap">
+      ${coverUrl
+        ? `<div class="birthday-recap-hero" style="background-image:url('${coverUrl}')"></div>`
+        : `<div class="birthday-recap-hero birthday-recap-hero-empty">🎂</div>`}
+      <div class="birthday-recap-body">
+        <div class="birthday-recap-title">🎉 ${escapeHtml(kid ? kid.name : "")} turned ${escapeHtml(entry.birthdayNum || "?")}!</div>
+        ${entry.theme ? `<div class="birthday-recap-theme">${escapeHtml(entry.theme)}</div>` : ""}
+        <div class="birthday-recap-meta-row">
+          <span>${formatDate(entry.date)}</span>
+          ${entry.location ? `<span>📍 ${escapeHtml(entry.location)}</span>` : ""}
+        </div>
+        ${entry.note ? `<p class="birthday-recap-note">${escapeHtml(entry.note)}</p>` : ""}
+        ${entry.attendees && entry.attendees.length ? `
+          <div class="birthday-recap-section">
+            <div class="birthday-recap-section-title">Who was there</div>
+            <div class="chip-pills-display">${entry.attendees.map(a => `<span class="chip-pill-display">${escapeHtml(a)}</span>`).join("")}</div>
+          </div>` : ""}
+        ${entry.gifts && entry.gifts.length ? `
+          <div class="birthday-recap-section">
+            <div class="birthday-recap-section-title">🎁 Favorite gifts</div>
+            <div class="chip-pills-display">${entry.gifts.map(g => `<span class="chip-pill-display">${escapeHtml(g)}</span>`).join("")}</div>
+          </div>` : ""}
+        ${photos.length ? `
+          <div class="birthday-recap-section">
+            <div class="birthday-recap-section-title">Photos</div>
+            <div class="birthday-recap-gallery">
+              ${photos.map((p, i) => `<div class="birthday-recap-gallery-tile" data-lightbox="${entry.id}" data-idx="${i}"><img src="${p.url}" alt=""></div>`).join("")}
+            </div>
+          </div>` : ""}
+        ${state.isEditMode ? `
+          <div class="birthday-recap-actions">
+            <button type="button" class="btn-secondary" id="recapEditBtn">✎ Edit this birthday</button>
+            <button type="button" class="btn-secondary danger" id="recapDeleteBtn">🗑 Delete</button>
+          </div>` : ""}
+      </div>
+      <div class="birthday-recap-nav">
+        <button type="button" class="btn-secondary" id="recapPrevBtn" ${hasPrev ? "" : "disabled"}>‹ Previous</button>
+        <button type="button" class="btn-secondary" id="recapCloseBtn">Close</button>
+        <button type="button" class="btn-secondary" id="recapNextBtn" ${hasNext ? "" : "disabled"}>Next ›</button>
+      </div>
+    </div>
+  `;
+
+  bindCardEvents(content); // wires up the [data-lightbox] gallery tiles
+  document.getElementById("recapCloseBtn").addEventListener("click", closeAddSheet);
+  if (hasPrev) {
+    document.getElementById("recapPrevBtn").addEventListener("click", () => {
+      renderBirthdayRecap(kidId, birthdayEntries[idx - 1].birthdayNum);
+    });
+  }
+  if (hasNext) {
+    document.getElementById("recapNextBtn").addEventListener("click", () => {
+      renderBirthdayRecap(kidId, birthdayEntries[idx + 1].birthdayNum);
+    });
+  }
+  if (state.isEditMode) {
+    document.getElementById("recapEditBtn").addEventListener("click", () => openEditSheet(entry.id));
+    document.getElementById("recapDeleteBtn").addEventListener("click", () => confirmDelete(entry.id));
+  }
 }
 
 
@@ -1505,7 +1589,18 @@ function renderEntryForm(existing) {
           <div class="field"><label>Birthday #</label><input type="number" id="fBirthdayNum" min="1" max="18" placeholder="Auto" value="${existing ? existing.birthdayNum || "" : ""}"></div>
           <div class="field"><label>Theme</label><input type="text" id="fTheme" placeholder="e.g. Dinosaurs" value="${existing ? escapeHtml(existing.theme || "") : ""}"></div>
         </div>
-        <div class="field"><label>Note (optional)</label><textarea id="fNote">${existing ? existing.note || "" : ""}</textarea></div>
+        <div class="field"><label>Location (optional)</label><input type="text" id="fBirthdayLocation" placeholder="e.g. Grandma's backyard" value="${existing ? escapeHtml(existing.location || "") : ""}"></div>
+        <div class="field">
+          <label>Who was there (optional)</label>
+          <div class="chip-pills" id="attendeesPills"></div>
+          <input type="text" id="attendeesInput" placeholder="Type a name, press Enter">
+        </div>
+        <div class="field">
+          <label>Favorite gifts (optional)</label>
+          <div class="chip-pills" id="giftsPills"></div>
+          <input type="text" id="giftsInput" placeholder="Type a gift, press Enter">
+        </div>
+        <div class="field"><label>Note / story (optional)</label><textarea id="fNote" placeholder="How the day went...">${existing ? existing.note || "" : ""}</textarea></div>
         ${photoPickerHtml(existing)}`;
       break;
     case "letter":
@@ -1662,6 +1757,12 @@ function renderEntryForm(existing) {
     initFirstYearFields();
   }
 
+  // Birthday: attendees/gifts chip inputs
+  if (selectedType === "birthday") {
+    initChipInput("attendeesPills", "attendeesInput", existing ? existing.attendees : []);
+    initChipInput("giftsPills", "giftsInput", existing ? existing.gifts : []);
+  }
+
   // Context toggle for funny thing
   const toggleBtn = document.getElementById("toggleContext");
   if (toggleBtn) {
@@ -1752,6 +1853,41 @@ function renderPregnancyFields(subtype, existing) {
       });
     }
   }
+}
+
+// Generic "type + Enter to add a pill" input — used for birthday attendees
+// and gifts, but reusable anywhere a short freeform list is needed.
+function initChipInput(pillsId, inputId, seed) {
+  const pillsEl = document.getElementById(pillsId);
+  const inputEl = document.getElementById(inputId);
+  function addPill(text) {
+    text = text.trim();
+    if (!text) return;
+    const pill = document.createElement("span");
+    pill.className = "chip-pill";
+    pill.dataset.name = text;
+    pill.innerHTML = `${escapeHtml(text)} <button type="button" class="chip-pill-remove">×</button>`;
+    pill.querySelector(".chip-pill-remove").addEventListener("click", () => pill.remove());
+    pillsEl.appendChild(pill);
+  }
+  (seed || []).forEach(addPill);
+  inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addPill(inputEl.value);
+      inputEl.value = "";
+    }
+  });
+  inputEl.addEventListener("blur", () => {
+    if (inputEl.value.trim()) {
+      addPill(inputEl.value);
+      inputEl.value = "";
+    }
+  });
+}
+
+function collectChipPills(pillsId) {
+  return Array.from(document.getElementById(pillsId).querySelectorAll(".chip-pill")).map(p => p.dataset.name);
 }
 
 function addCravingRow(text) {
@@ -2341,6 +2477,9 @@ async function saveEntry() {
       case "birthday":
         data.birthdayNum = getVal("fBirthdayNum");
         data.theme = getVal("fTheme");
+        data.location = getVal("fBirthdayLocation");
+        data.attendees = collectChipPills("attendeesPills");
+        data.gifts = collectChipPills("giftsPills");
         data.note = getVal("fNote");
         break;
       case "letter":
