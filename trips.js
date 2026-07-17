@@ -13,6 +13,7 @@ import { db } from "./firebase.js";
 import { state } from "./state.js";
 import { escapeHtml, getVal, showToast, parseLocalDate, formatTripDateRange, lockBodyScroll } from "./utils.js";
 import { openSlideshow } from "./slideshow.js";
+import { icon } from "./icons.js";
 import { renderCard, bindCardEvents, closeAddSheet, renderFeed } from "./app.js";
 
 export function listenToTrips() {
@@ -172,15 +173,17 @@ export function renderTripDetail(tripId) {
 
   content.innerHTML = `
     <div class="trip-detail-header">
-      <div class="sheet-title" style="margin-bottom:2px;">🧳 ${escapeHtml(trip ? trip.title : "Trip")}</div>
+      <div class="trip-detail-title-row">
+        <div class="sheet-title" style="margin-bottom:2px;">🧳 ${escapeHtml(trip ? trip.title : "Trip")}</div>
+        ${state.isEditMode ? `
+          <div class="card-edit-controls">
+            <button class="icon-btn" id="editTripBtn" aria-label="Edit trip" title="Edit trip">${icon("pencil")}</button>
+            <button class="icon-btn danger" id="deleteTripBtn" aria-label="Delete trip" title="Delete trip">${icon("trash")}</button>
+          </div>` : ""}
+      </div>
       ${trip && trip.location ? `<div class="trip-detail-location">📍 ${escapeHtml(trip.location)}</div>` : ""}
       <div class="trip-detail-meta">${dateRangeTxt}${dateRangeTxt ? " · " : ""}${tripEntries.length} moment${tripEntries.length === 1 ? "" : "s"}</div>
-      <button type="button" class="btn-secondary" id="playTripSlideshowBtn">▶ Play this trip</button>
-      ${state.isEditMode ? `
-        <div class="trip-detail-actions">
-          <button type="button" class="btn-secondary" id="editTripBtn">✎ Edit trip</button>
-          <button type="button" class="btn-secondary danger" id="deleteTripBtn">🗑 Delete trip</button>
-        </div>` : ""}
+      <button type="button" class="btn-primary" id="playTripSlideshowBtn">▶ Play this trip</button>
     </div>
     <div class="trip-detail-feed">
       ${tripEntries.length ? tripEntries.map(e => renderCard(e)).join("") : `<div class="feed-empty">No moments in this trip yet.</div>`}
