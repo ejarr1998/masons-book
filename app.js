@@ -1233,12 +1233,13 @@ function initFirstYearScrubbers(root) {
 }
 
 // Bump Progression timelapse: a layered "onion-skin" build, not a crossfade.
-// Week by week, each photo dissolves in ON TOP of the stack; once it's fully
-// in, the previous one dims to a faint ghost and the next week begins. So the
-// current week is always crisp while every earlier week lingers as a
-// translucent echo underneath — the belly literally grows as overlapping
-// silhouettes. After the latest week is fully in, everything dissolves out
-// and the cycle restarts from the first photo. Manual scrubbing/tapping snaps
+// One layer per week, stacked oldest-to-newest; each week dissolves in over
+// the stack and stays as a faint ghost once the next week takes the lead, so
+// the belly grows as overlapping silhouettes. The autoplay advances on a
+// steady beat while every opacity change glides over a longer window, so
+// dissolves always overlap — constant gradual motion, never a "jump" between
+// photos. At the latest week the stack melts back down to the first photo
+// (no blink-out) and the build begins again. Manual scrubbing/tapping snaps
 // fast; autoplay pauses briefly on any interaction so they never fight.
 function initBumpMorphs(root) {
   root.querySelectorAll(".bump-morph").forEach(morph => {
@@ -1270,10 +1271,10 @@ function initBumpMorphs(root) {
     const GHOST_OPACITY = 0.4;   // how strongly earlier weeks echo underneath
     const CURRENT_OPACITY = 0.88; // latest week dominates but stays translucent
                                   // enough for the ghosts to shimmer through
-    const FADE_IN_MS = 2500;     // each week's entrance
+    const FADE_IN_MS = 3500;     // every opacity change glides over this window…
+    const STEP_MS = 2000;        // …but a new week starts this often, so fades
+                                  // always overlap — constant motion, no steps
     const FADE_FAST_MS = 300;    // manual scrub/tap
-    const HOLD_END_MS = 2500;    // admire the full stack before resetting
-    const FADE_OUT_MS = 1500;    // everything dissolves before the restart
 
     let pos = 0;
 
@@ -1289,38 +1290,24 @@ function initBumpMorphs(root) {
       });
     }
 
-    // ---- Autoplay: sequential build, hold, dissolve out, restart ----
-    let pending = null;
+    // ---- Autoplay: a steady beat, not a choreography. The engine advances
+    // one week every STEP_MS and lets the long CSS transitions retarget
+    // mid-flight, so several photos are always mid-dissolve and the motion
+    // never "jumps". Wrapping from the latest week back to week 0 is just
+    // another state change — the stack melts down to the first photo instead
+    // of blinking out.
+    let timer = null;
     let paused = false;
     let resumeTimeout = null;
     let visible = false;
 
-    function clearPending() {
-      clearTimeout(pending);
-      pending = null;
-    }
-    // From week k: fade it in, wait for that fade to complete, then either
-    // start the next week's entrance or wrap up the cycle and restart.
-    function scheduleStep(k, delay) {
-      clearPending();
-      pending = setTimeout(() => {
-        applyState(k, FADE_IN_MS);
-        if (k < layers.length - 1) {
-          scheduleStep(k + 1, FADE_IN_MS);
-        } else {
-          pending = setTimeout(() => {
-            layers.forEach(img => { img.style.transitionDuration = FADE_OUT_MS + "ms"; img.style.opacity = 0; });
-            pending = setTimeout(() => scheduleStep(0, FADE_IN_MS), FADE_OUT_MS);
-          }, FADE_IN_MS + HOLD_END_MS);
-        }
-      }, delay);
-    }
     function startAutoplay() {
-      if (pending || paused || !visible) return;
-      scheduleStep(pos, 0);
+      if (timer || paused || !visible) return;
+      timer = setInterval(() => applyState((pos + 1) % weeks.length, FADE_IN_MS), STEP_MS);
     }
     function stopAutoplay() {
-      clearPending();
+      clearInterval(timer);
+      timer = null;
     }
     function userInteracted() {
       paused = true;
