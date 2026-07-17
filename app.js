@@ -3504,13 +3504,60 @@ async function checkBackupReminder() {
 // Every {url, path} pair an entry owns, across all its possible shapes —
 // same coverage as collectEntryPhotoPaths, but keeping the url too since
 // that's what's actually fetchable.
+// Turns arbitrary text into a filename-safe fragment: lowercase, hyphens
+// instead of spaces/punctuation, no leading/trailing hyphens, capped length.
+function slugify(str) {
+  return (str || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "") // strip accents
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+// Builds a human-readable filename base like:
+//   2026-03-15_sonogram_mason_20-week-scan
+//   2025-08-20_pregnancy-update_week20
+//   2025-11-24_birth_mason
+// so a browsed photos/ folder actually means something, and — since it
+// leads with the date — sorts chronologically for free.
+function friendlyPhotoBaseName(entry, contextLabel) {
+  const dateSlug = entry.date || "no-date";
+  const catSlug = slugify(CATEGORIES[entry.category]?.label || entry.category || "entry");
+  const kidSlug = (entry.kids && entry.kids.length) ? slugify(kidsLabel(entry.kids)) : "";
+  const descSlugRaw = slugify(entry.title || entry.caption || entry.babyName || entry.theme || "");
+  const descSlug = (descSlugRaw && descSlugRaw !== kidSlug) ? descSlugRaw : "";
+  const parts = [dateSlug, catSlug, kidSlug, descSlug, contextLabel].filter(Boolean);
+  return parts.join("_");
+}
+
 function collectEntryPhotoRefs(entry) {
   const refs = [];
-  (entry.photos || []).forEach(p => { if (p && p.path && p.url) refs.push({ path: p.path, url: p.url }); });
-  (entry.weeks || []).forEach(w => { if (w.photo && w.photo.path && w.photo.url) refs.push({ path: w.photo.path, url: w.photo.url }); });
-  (entry.months || []).forEach(m => { if (m.photo && m.photo.path && m.photo.url) refs.push({ path: m.photo.path, url: m.photo.url }); });
-  if (entry.thenPhoto && entry.thenPhoto.path && entry.thenPhoto.url) refs.push({ path: entry.thenPhoto.path, url: entry.thenPhoto.url });
-  if (entry.nowPhoto && entry.nowPhoto.path && entry.nowPhoto.url) refs.push({ path: entry.nowPhoto.path, url: entry.nowPhoto.url });
+  const generalPhotos = entry.photos || [];
+  generalPhotos.forEach((p, i) => {
+    if (p && p.path && p.url) {
+      const context = generalPhotos.length > 1 ? String(i + 1) : "";
+      refs.push({ path: p.path, url: p.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, context) });
+    }
+  });
+  (entry.weeks || []).forEach(w => {
+    if (w.photo && w.photo.path && w.photo.url) {
+      refs.push({ path: w.photo.path, url: w.photo.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, `week${w.week}`) });
+    }
+  });
+  (entry.months || []).forEach(m => {
+    if (m.photo && m.photo.path && m.photo.url) {
+      refs.push({ path: m.photo.path, url: m.photo.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, slugify(m.label) || `month${m.monthIndex}`) });
+    }
+  });
+  if (entry.thenPhoto && entry.thenPhoto.path && entry.thenPhoto.url) {
+    refs.push({ path: entry.thenPhoto.path, url: entry.thenPhoto.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, "then") });
+  }
+  if (entry.nowPhoto && entry.nowPhoto.path && entry.nowPhoto.url) {
+    refs.push({ path: entry.nowPhoto.path, url: entry.nowPhoto.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, "now") });
+  }
   return refs;
 }
 
@@ -3555,7 +3602,9 @@ async function renderBackupSheet() {
     <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">
       This downloads everything — every entry, kid profile, tag, trip, and photo — into a single .zip
       file, entirely separate from Firebase. Save it to Google Drive, an external drive, wherever feels
-      safe. Nothing in the app changes; this only reads and packages what's already there.
+      safe. Photos are named by date, type, and who/what they're of (e.g. <em>2026-03-15_sonogram_mason_20-week-scan.jpg</em>)
+      instead of a random ID, so the folder actually means something if you ever browse it directly.
+      Nothing in the app changes; this only reads and packages what's already there.
     </p>
     <button class="btn-primary" id="fullBackupBtn">Download full backup (with photos)</button>
     <button class="btn-secondary" id="dataOnlyBackupBtn">Download data only (fast, no photos)</button>
@@ -3590,27 +3639,46 @@ async function runBackup(includePhotos) {
       hiddenCategoryIds,
       entries: state.entries
     };
-    const dataJson = JSON.stringify(manifest, timestampReplacer, 2);
 
     const zip = new JSZip();
-    zip.file("data.json", dataJson);
 
     if (includePhotos) {
       const refs = collectAllPhotoRefs();
+      const usedNames = new Set();
+      const photoIndex = [];
       for (let i = 0; i < refs.length; i++) {
         progressEl.textContent = `Downloading photo ${i + 1} of ${refs.length}...`;
         try {
           const resp = await fetch(refs[i].url);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const blob = await resp.blob();
-          zip.file(`photos/${refs[i].path}`, blob);
+          // Descriptive filenames (date_category_kid_detail) instead of the
+          // raw Storage path, so browsing the zip's photos/ folder actually
+          // means something — and since the date leads, it sorts
+          // chronologically for free. Fall back + de-dupe if two photos
+          // would otherwise land on the exact same name.
+          const ext = (refs[i].path.split(".").pop() || "jpg").toLowerCase();
+          const base = refs[i].friendlyBase || "photo";
+          let filename = `${base}.${ext}`;
+          let attempt = 2;
+          while (usedNames.has(filename)) {
+            filename = `${base}-${attempt}.${ext}`;
+            attempt++;
+          }
+          usedNames.add(filename);
+          zip.file(`photos/${filename}`, blob);
+          photoIndex.push({ filename, originalPath: refs[i].path, entryId: refs[i].entryId });
         } catch (err) {
           // A single missing/broken photo shouldn't sink the whole backup —
           // log it and keep going with everything else.
           console.warn("Skipped photo in backup:", refs[i].path, err);
         }
       }
+      manifest.photoIndex = photoIndex;
     }
+
+    const dataJson = JSON.stringify(manifest, timestampReplacer, 2);
+    zip.file("data.json", dataJson);
 
     progressEl.textContent = "Zipping everything up...";
     const zipBlob = await zip.generateAsync({ type: "blob" }, (metadata) => {
