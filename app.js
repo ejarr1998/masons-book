@@ -48,7 +48,8 @@ const CATEGORIES = {
   pregnancy:  { label: "Pregnancy",    emoji: "🤰", tagLabel: "Pregnancy" },
   birth:      { label: "Birth Day",    emoji: "👶", tagLabel: "Birth Day" },
   thennow:    { label: "Then vs. Now", emoji: "↔️", tagLabel: "Then vs. Now" },
-  firstyear:  { label: "First Year",   emoji: "🎞️", tagLabel: "First Year" }
+  firstyear:  { label: "First Year",   emoji: "🎞️", tagLabel: "First Year" },
+  sonogram:   { label: "Sonogram",     emoji: "🩻", tagLabel: "Sonogram" }
 };
 
 const MILESTONE_SUGGESTIONS = [
@@ -800,7 +801,20 @@ export function renderCard(e) {
     </div>` : "";
 
   let photosHtml = "";
-  if (e.photos && e.photos.length === 1) {
+  if (e.category === "sonogram" && e.photos && e.photos.length) {
+    // Sonograms are wide, labeled images — cropping them (the way .photo-hero
+    // does) would cut off the clinic text along the edges, so they get their
+    // own "film viewer" frame that always shows the full image on near-black.
+    photosHtml = `<div class="sonogram-frame" data-lightbox="${e.id}" data-idx="0">
+      <img src="${e.photos[0].url}" alt="Sonogram">
+      ${e.weeks ? `<span class="sonogram-frame-badge">WK ${escapeHtml(String(e.weeks))}</span>` : ""}
+    </div>`;
+    if (e.photos.length > 1) {
+      photosHtml += `<div class="photo-strip">${e.photos.slice(1).map((p, i) =>
+        `<div class="photo-strip-thumb" data-lightbox="${e.id}" data-idx="${i + 1}"><img src="${p.url}" alt=""></div>`
+      ).join("")}</div>`;
+    }
+  } else if (e.photos && e.photos.length === 1) {
     photosHtml = `<div class="photo-hero" data-lightbox="${e.id}" data-idx="0"><img src="${e.photos[0].url}" alt=""></div>`;
   } else if (e.photos && e.photos.length > 1) {
     photosHtml = `<div class="photo-strip">${e.photos.map((p, i) =>
@@ -888,6 +902,10 @@ export function renderCard(e) {
         body = `<div class="card-title">${escapeHtml(e.title || "Pregnancy update")}</div>
                 ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
       }
+      break;
+    case "sonogram":
+      body = `<div class="card-title">${escapeHtml(e.title || "Sonogram")}</div>
+              ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
       break;
     case "thennow": {
       const tf = e.thenFocal || { x: 50, y: 50 };
@@ -1803,6 +1821,29 @@ function renderEntryForm(existing) {
           }).join("")}
         </div>`;
       break;
+    case "sonogram":
+      // The sonogram photo is the whole point of this entry, so instead of the
+      // generic file input the form leads with a drop zone: drag the image
+      // straight onto the frame (or tap it to browse). Files land in the same
+      // pendingPhotos pipeline as every other photo picker, so previews,
+      // tagging, HEIC conversion, and upload all work unchanged.
+      typeFields = `
+        <div class="field"><label>Title</label><input type="text" id="fTitle" placeholder="e.g. 20-week anatomy scan" value="${existing ? escapeHtml(existing.title || "") : ""}"></div>
+        <div class="field"><label>Week (optional)</label><input type="number" id="fWeeks" min="4" max="42" placeholder="e.g. 20" value="${existing ? existing.weeks || "" : ""}"></div>
+        <div class="field">
+          <label>Sonogram photo</label>
+          <div class="sonogram-dropzone" id="sonogramDropzone">
+            <div class="sonogram-dropzone-hint">
+              ${icon("camera")}
+              <span>Drop the sonogram photo here</span>
+              <em>or tap to browse</em>
+            </div>
+          </div>
+          <input type="file" id="fPhotos" accept="image/*" multiple style="display:none;">
+          <div class="photo-input-preview" id="photoPreview"></div>
+        </div>
+        <div class="field"><label>Caption (optional)</label><textarea id="fCaption" placeholder="What did we see...">${existing ? existing.caption || "" : ""}</textarea></div>`;
+      break;
     case "pregnancy":
       typeFields = `
         <div class="field">
@@ -1895,6 +1936,11 @@ function renderEntryForm(existing) {
   // First Year: 13 fixed photo slots
   if (selectedType === "firstyear") {
     initFirstYearFields();
+  }
+
+  // Sonogram: drag-and-drop photo drop zone
+  if (selectedType === "sonogram") {
+    initSonogramDropzone();
   }
 
   // Birthday: attendees/gifts chip inputs
@@ -2369,6 +2415,37 @@ function renderPhotoPreview() {
   });
 }
 
+// Sonogram drop zone: dropped image files join pendingPhotos just like files
+// chosen through the hidden input, so the standard preview/tag/upload flow
+// takes over from there. Tapping the zone opens the file picker instead.
+function initSonogramDropzone() {
+  const zone = document.getElementById("sonogramDropzone");
+  const photoInput = document.getElementById("fPhotos");
+  if (!zone || !photoInput) return;
+
+  zone.addEventListener("click", () => photoInput.click());
+
+  ["dragenter", "dragover"].forEach(evt => zone.addEventListener(evt, (e) => {
+    // preventDefault is what allows a drop to happen at all — without it the
+    // browser refuses every drop.
+    e.preventDefault();
+    zone.classList.add("dragover");
+  }));
+  ["dragleave", "drop"].forEach(evt => zone.addEventListener(evt, (e) => {
+    e.preventDefault();
+    zone.classList.remove("dragover");
+  }));
+  zone.addEventListener("drop", (e) => {
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/") || isHeicFile(f));
+    if (!files.length) {
+      showToast("Drop an image file");
+      return;
+    }
+    pendingPhotos = pendingPhotos.concat(files);
+    renderPhotoPreview();
+  });
+}
+
 // ============================================================
 // PHOTO PEOPLE-TAGGING
 // ============================================================
@@ -2572,6 +2649,10 @@ async function saveEntry() {
     showToast("Add at least one photo first");
     return;
   }
+  if (selectedType === "sonogram" && pendingPhotos.length === 0 && editingPhotos.length === 0) {
+    showToast("Drop in the sonogram photo first");
+    return;
+  }
 
   const btn = document.getElementById("saveEntryBtn");
   btn.disabled = true;
@@ -2641,6 +2722,12 @@ async function saveEntry() {
         }
         break;
       }
+      case "sonogram":
+        // photos are picked up by the generic fPhotos block below
+        data.title = getVal("fTitle");
+        data.weeks = getVal("fWeeks");
+        data.caption = getVal("fCaption");
+        break;
       case "thennow": {
         data.title = getVal("fTitle");
         data.caption = getVal("fCaption");
