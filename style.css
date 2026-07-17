@@ -402,6 +402,12 @@ input, textarea, select{ font-family: inherit; }
   padding:3px 8px; border-radius:4px; pointer-events:none;
 }
 
+/* Brief fade when a thumbnail is promoted into the spotlight */
+@keyframes sonogramSwap{
+  from{ opacity:0.35; } to{ opacity:1; }
+}
+.sonogram-swap-flash img{ animation: sonogramSwap 0.25s ease; }
+
 /* Drop zone in the add/edit form */
 .sonogram-dropzone{
   border:2px dashed var(--ink-soft); border-radius:12px;

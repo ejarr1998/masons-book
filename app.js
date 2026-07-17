@@ -819,8 +819,10 @@ export function renderCard(e) {
       ${e.weeks ? `<span class="sonogram-frame-badge">WK ${escapeHtml(String(e.weeks))}</span>` : ""}
     </div>`;
     if (e.photos.length > 1) {
+      // Thumbnails promote into the spotlight on tap (data-sonogram-thumb)
+      // rather than opening the lightbox — only the main frame goes fullscreen.
       photosHtml += `<div class="photo-strip">${e.photos.slice(1).map((p, i) =>
-        `<div class="photo-strip-thumb" data-lightbox="${e.id}" data-idx="${i + 1}"><img src="${p.url}" alt=""></div>`
+        `<div class="photo-strip-thumb" data-sonogram-thumb="${e.id}" data-idx="${i + 1}"><img src="${p.url}" alt=""></div>`
       ).join("")}</div>`;
     }
   } else if (e.photos && e.photos.length === 1) {
@@ -1003,6 +1005,23 @@ export function bindCardEvents(root) {
       const idx = parseInt(img.dataset.idx, 10);
       const entry = state.entries.find(e => e.id === entryId);
       openLightbox(entry.photos, idx, entry.caption || "");
+    });
+  });
+  // Sonogram gallery: tapping a thumbnail swaps it into the main "spotlight"
+  // frame (and vice versa — the old main photo takes the thumb's place).
+  // The frame's data-idx tracks which photo it currently shows, so tapping
+  // the spotlight still opens the lightbox on the right image.
+  root.querySelectorAll("[data-sonogram-thumb]").forEach(thumb => {
+    thumb.addEventListener("click", () => {
+      const frame = thumb.closest(".card").querySelector(".sonogram-frame");
+      if (!frame) return;
+      const frameImg = frame.querySelector("img");
+      const thumbImg = thumb.querySelector("img");
+      [frameImg.src, thumbImg.src] = [thumbImg.src, frameImg.src];
+      [frame.dataset.idx, thumb.dataset.idx] = [thumb.dataset.idx, frame.dataset.idx];
+      frame.classList.remove("sonogram-swap-flash");
+      void frame.offsetWidth; // restart the CSS animation on every swap
+      frame.classList.add("sonogram-swap-flash");
     });
   });
   // Single-photo heroes: portrait photos get a taller 4:5 frame so
