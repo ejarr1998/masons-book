@@ -1040,6 +1040,32 @@ button svg, label svg{ pointer-events:none; }
 .countdown-main{ font-family:'Caveat', cursive; font-weight:700; font-size:20px; line-height:1.15; }
 .countdown-sub{ font-size:11px; font-weight:600; color: rgba(246,241,231,0.65); text-transform:uppercase; letter-spacing:0.05em; }
 
+/* Active filter bar: appears whenever any filter (people/type/date/tags) is
+   applied — e.g. after tapping a hashtag — so clearing it is one tap away
+   instead of digging back into the Filters sheet. */
+.active-filter-bar{
+  margin: 14px 20px 0;
+  padding: 4px 4px 4px 14px;
+  border-radius: 100px;
+  background: var(--parchment-2);
+  border: 1px solid var(--taupe);
+  display:flex; align-items:center; gap:8px;
+}
+.active-filter-summary{
+  flex:1; min-width:0; text-align:left; background:none; border:none; padding:6px 0;
+  font-family:inherit; font-size:13px; font-weight:600; color: var(--forest);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer;
+}
+.active-filter-clear{
+  flex-shrink:0; width:28px; height:28px; border-radius:50%; border:none;
+  background: var(--white); color: var(--ink-soft); font-size:14px; font-weight:700;
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.active-filter-clear:hover, .active-filter-clear:active{
+  background: var(--rust); color: var(--white);
+}
+
 /* Loading skeletons: shimmer while Firestore connects, instead of plain text */
 .skeleton-card{
   background: var(--white); border-radius:18px; overflow:hidden;

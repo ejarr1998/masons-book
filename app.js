@@ -315,6 +315,39 @@ function updateHeaderSub() {
     sub.textContent = kid ? `${kid.name}'s Book` : "Feed";
   }
   renderCountdownBanner();
+  renderActiveFilterBar();
+}
+
+// Small pill above the feed summarizing any active filter(s), with a one-tap
+// clear — so tapping a hashtag (which applies a filter) doesn't strand the
+// person without an easy way back to the full feed.
+function renderActiveFilterBar() {
+  const bar = document.getElementById("activeFilterBar");
+  if (!bar) return;
+  const parts = [];
+  if (activeKidFilter !== "all") parts.push(peopleSummary());
+  if (activeCategoryFilter !== "all") parts.push(typeSummary());
+  if (activeYearFilter !== "all") parts.push(datesSummary());
+  if (activeTagFilters.length > 0) parts.push(tagsSummary());
+
+  if (parts.length === 0) {
+    bar.style.display = "none";
+    bar.innerHTML = "";
+    return;
+  }
+
+  bar.innerHTML = `
+    <button type="button" class="active-filter-summary" id="activeFilterOpenBtn">🔎 ${escapeHtml(parts.join(" · "))}</button>
+    <button type="button" class="active-filter-clear" id="activeFilterClearBtn" aria-label="Clear filters" title="Clear filters">✕</button>`;
+  bar.style.display = "flex";
+
+  document.getElementById("activeFilterOpenBtn").addEventListener("click", () => {
+    expandedFilterSections.tags = activeTagFilters.length > 0;
+    openFiltersSheet();
+  });
+  document.getElementById("activeFilterClearBtn").addEventListener("click", () => {
+    clearAllFilters();
+  });
 }
 
 // ---- Countdown banner: weeks until arrival, flipping to age after birth ----
@@ -571,16 +604,20 @@ function bindFilterSectionEvents() {
     closeAddSheet();
   });
   document.getElementById("clearAllFiltersBtn").addEventListener("click", () => {
-    activeKidFilter = "all";
-    activeCategoryFilter = "all";
-    activeYearFilter = "all";
-    activeMonthFilter = "all";
-    activeTagFilters = [];
-    updateHeaderSub();
-    updateFiltersButtonBadge();
-    renderFeed();
+    clearAllFilters();
     closeAddSheet();
   });
+}
+
+function clearAllFilters() {
+  activeKidFilter = "all";
+  activeCategoryFilter = "all";
+  activeYearFilter = "all";
+  activeMonthFilter = "all";
+  activeTagFilters = [];
+  updateHeaderSub();
+  updateFiltersButtonBadge();
+  renderFeed();
 }
 
 // ============================================================
