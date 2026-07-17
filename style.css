@@ -738,9 +738,21 @@ input, textarea, select{ font-family: inherit; }
   margin: -12px -12px 12px; padding: 11px 14px;
   background: linear-gradient(120deg, var(--rust) 0%, var(--rust-soft) 100%);
 }
+.on-this-day-title-group{
+  display:flex; align-items:center; gap:9px; min-width:0;
+}
+.on-this-day-clock{
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  width:32px; height:32px; border-radius:50%;
+  background: rgba(255,255,255,0.22); font-size:16px; line-height:1;
+}
 .on-this-day-ribbon{
-  font-family:'Caveat', cursive; font-weight:700; font-size:21px; line-height:1.1;
+  font-family:'Caveat', cursive; font-weight:700; font-size:23px; line-height:1.05;
   color: var(--parchment); letter-spacing:0.01em; text-transform:none;
+}
+.on-this-day-sub{
+  font-size:11px; font-weight:600; color: rgba(246,241,231,0.88); letter-spacing:0.02em;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .on-this-day-shuffle{
   font-size:11.5px; font-weight:700; color: var(--parchment);

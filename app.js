@@ -727,7 +727,13 @@ function renderOnThisDayWidgetHtml(entry, poolSize) {
   return `
     <div class="on-this-day-wrap" id="onThisDayWrap">
       <div class="on-this-day-header">
-        <span class="on-this-day-ribbon">🕰️ On This Day — ${yearsAgo} year${yearsAgo === 1 ? "" : "s"} ago</span>
+        <div class="on-this-day-title-group">
+          <span class="on-this-day-clock" aria-hidden="true">🕰️</span>
+          <div>
+            <div class="on-this-day-ribbon">On This Day</div>
+            <div class="on-this-day-sub">${yearsAgo} year${yearsAgo === 1 ? "" : "s"} ago today · ${formatDate(entry.date)}</div>
+          </div>
+        </div>
         ${poolSize > 1 ? `<button class="on-this-day-shuffle" id="onThisDayShuffleBtn" title="Show another">${icon("shuffle")}<span>Another</span></button>` : ""}
       </div>
       ${renderCard(entry)}
