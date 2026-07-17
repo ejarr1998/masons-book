@@ -1271,9 +1271,9 @@ function initBumpMorphs(root) {
     const GHOST_OPACITY = 0.4;   // how strongly earlier weeks echo underneath
     const CURRENT_OPACITY = 0.88; // latest week dominates but stays translucent
                                   // enough for the ghosts to shimmer through
-    const FADE_IN_MS = 3500;     // every opacity change glides over this window…
-    const STEP_MS = 2000;        // …but a new week starts this often, so fades
-                                  // always overlap — constant motion, no steps
+    const FADE_IN_MS = 4000;     // every opacity change glides over this window…
+    const STEP_MS = 4500;        // …and a new week starts this often — a 4s melt
+                                  // plus a calm beat of rest on each photo
     const FADE_FAST_MS = 300;    // manual scrub/tap
 
     let pos = 0;
