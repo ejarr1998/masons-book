@@ -1872,6 +1872,9 @@ function renderEntryForm(existing) {
           </div>
           <input type="file" id="fPhotos" accept="image/*" multiple style="display:none;">
           <div class="photo-input-preview" id="photoPreview"></div>
+          <div id="sonogramReorderHint" style="font-size:11.5px; color:var(--ink-soft); margin-bottom:12px; display:none;">
+            Use ‹ › to reorder — the one marked ★ Cover is the enlarged photo up top.
+          </div>
         </div>
         <div class="field"><label>Caption (optional)</label><textarea id="fCaption" placeholder="What did we see...">${existing ? existing.caption || "" : ""}</textarea></div>`;
       break;
@@ -2406,23 +2409,52 @@ function renderPhotoPreview() {
   if (!preview) return;
   preview.innerHTML = "";
 
+  // Sonograms spotlight photos[0] as the enlarged frame (see renderTagOverlay/
+  // the card renderer), so for this type the order genuinely matters — give
+  // each thumb ‹ › buttons to move it, plus a badge marking whichever one is
+  // currently first. Reordering only happens within each of editingPhotos/
+  // pendingPhotos (existing photos always save before newly-added ones), so
+  // the "Cover" badge only applies to a pending photo when there are no
+  // existing photos ahead of it.
+  const isSonogram = selectedType === "sonogram";
+
   editingPhotos.forEach((p, i) => {
     if (!p.people) p.people = [];
+    const isCover = isSonogram && i === 0;
+    const reorderHtml = isSonogram ? `
+      <div class="sono-reorder-row">
+        <button type="button" class="sono-reorder-btn" data-move-existing="${i}" data-dir="-1" ${i === 0 ? "disabled" : ""} title="Move earlier">‹</button>
+        <span class="sono-reorder-label">${isCover ? "★ Cover" : ""}</span>
+        <button type="button" class="sono-reorder-btn" data-move-existing="${i}" data-dir="1" ${i === editingPhotos.length - 1 ? "disabled" : ""} title="Move later">›</button>
+      </div>` : "";
     preview.innerHTML += `
-      <div class="photo-thumb">
-        <img src="${p.url}">
-        <button type="button" class="photo-thumb-remove" data-remove-existing="${i}" title="Remove photo">×</button>
-        <button type="button" class="photo-thumb-tag-btn" data-tag-existing="${i}" title="Tag people">${icon("tag")}</button>
+      <div class="photo-thumb-wrap">
+        <div class="photo-thumb ${isCover ? "photo-thumb-cover" : ""}">
+          <img src="${p.url}">
+          <button type="button" class="photo-thumb-remove" data-remove-existing="${i}" title="Remove photo">×</button>
+          <button type="button" class="photo-thumb-tag-btn" data-tag-existing="${i}" title="Tag people">${icon("tag")}</button>
+        </div>
+        ${reorderHtml}
       </div>`;
   });
   pendingPhotos.forEach((file, i) => {
     if (!pendingPhotoMeta[i]) pendingPhotoMeta[i] = { location: "", people: [] };
+    const isCover = isSonogram && editingPhotos.length === 0 && i === 0;
+    const reorderHtml = isSonogram ? `
+      <div class="sono-reorder-row">
+        <button type="button" class="sono-reorder-btn" data-move-pending="${i}" data-dir="-1" ${i === 0 ? "disabled" : ""} title="Move earlier">‹</button>
+        <span class="sono-reorder-label">${isCover ? "★ Cover" : ""}</span>
+        <button type="button" class="sono-reorder-btn" data-move-pending="${i}" data-dir="1" ${i === pendingPhotos.length - 1 ? "disabled" : ""} title="Move later">›</button>
+      </div>` : "";
     preview.innerHTML += `
-      <div class="photo-thumb">
-        <img id="pendingPreviewImg${i}" src="" alt="">
-        <button type="button" class="photo-thumb-remove" data-remove-pending="${i}" title="Remove photo">×</button>
-        <button type="button" class="photo-thumb-tag-btn" data-tag-pending="${i}" title="Tag people">${icon("tag")}</button>
-        ${selectedType === "sonogram" ? `<button type="button" class="photo-thumb-crop-btn" data-crop-pending="${i}" title="Crop photo">${icon("crop")}</button>` : ""}
+      <div class="photo-thumb-wrap">
+        <div class="photo-thumb ${isCover ? "photo-thumb-cover" : ""}">
+          <img id="pendingPreviewImg${i}" src="" alt="">
+          <button type="button" class="photo-thumb-remove" data-remove-pending="${i}" title="Remove photo">×</button>
+          <button type="button" class="photo-thumb-tag-btn" data-tag-pending="${i}" title="Tag people">${icon("tag")}</button>
+          ${selectedType === "sonogram" ? `<button type="button" class="photo-thumb-crop-btn" data-crop-pending="${i}" title="Crop photo">${icon("crop")}</button>` : ""}
+        </div>
+        ${reorderHtml}
       </div>`;
   });
   // Set preview sources after the elements exist — HEIC files (common when a
@@ -2467,6 +2499,30 @@ function renderPhotoPreview() {
       if (!cropSession) openNextCrop();
     });
   });
+  preview.querySelectorAll("[data-move-existing]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.moveExisting, 10);
+      const swapIdx = idx + parseInt(btn.dataset.dir, 10);
+      if (swapIdx < 0 || swapIdx >= editingPhotos.length) return;
+      [editingPhotos[idx], editingPhotos[swapIdx]] = [editingPhotos[swapIdx], editingPhotos[idx]];
+      renderPhotoPreview();
+    });
+  });
+  preview.querySelectorAll("[data-move-pending]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.movePending, 10);
+      const swapIdx = idx + parseInt(btn.dataset.dir, 10);
+      if (swapIdx < 0 || swapIdx >= pendingPhotos.length) return;
+      [pendingPhotos[idx], pendingPhotos[swapIdx]] = [pendingPhotos[swapIdx], pendingPhotos[idx]];
+      [pendingPhotoMeta[idx], pendingPhotoMeta[swapIdx]] = [pendingPhotoMeta[swapIdx], pendingPhotoMeta[idx]];
+      renderPhotoPreview();
+    });
+  });
+
+  const reorderHintEl = document.getElementById("sonogramReorderHint");
+  if (reorderHintEl) {
+    reorderHintEl.style.display = (isSonogram && (editingPhotos.length + pendingPhotos.length) > 1) ? "block" : "none";
+  }
 }
 
 // Sonogram drop zone: dropped image files join pendingPhotos just like files

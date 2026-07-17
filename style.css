@@ -922,6 +922,17 @@ input, textarea, select{ font-family: inherit; }
 .photo-input-preview{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; margin-bottom:16px; }
 .photo-thumb{ position:relative; width:64px; height:64px; }
 .photo-thumb img{ width:64px; height:64px; object-fit:cover; border-radius:10px; display:block; }
+.photo-thumb.photo-thumb-cover{ box-shadow: 0 0 0 3px var(--rust); }
+.photo-thumb-wrap{ display:flex; flex-direction:column; align-items:center; gap:5px; }
+.sono-reorder-row{ display:flex; align-items:center; gap:4px; }
+.sono-reorder-btn{
+  width:22px; height:20px; border-radius:6px; border:1px solid var(--taupe); background:var(--white);
+  color:var(--ink-soft); font-size:13px; font-weight:700; cursor:pointer; line-height:1;
+  display:flex; align-items:center; justify-content:center;
+}
+.sono-reorder-btn:disabled{ opacity:0.25; cursor:default; }
+.sono-reorder-btn:active:not(:disabled){ background:var(--parchment-2); }
+.sono-reorder-label{ font-size:9px; font-weight:800; color:var(--rust); text-transform:uppercase; letter-spacing:0.03em; min-width:36px; text-align:center; white-space:nowrap; }
 .photo-thumb-remove{
   position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%;
   background: var(--danger); color:#fff; border:2px solid var(--parchment);
