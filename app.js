@@ -904,9 +904,7 @@ export function renderCard(e) {
         // count lives in the toggle button instead.
         const morphHtml = sortedWeeks.length >= 2 ? `
                 <div class="bump-morph" data-bumpmorph-entry="${e.id}">
-                  <div class="firstyear-stage">
-                    <img class="firstyear-img" id="bumpMorphImgA-${e.id}" alt="">
-                    <img class="firstyear-img" id="bumpMorphImgB-${e.id}" alt="">
+                  <div class="firstyear-stage" id="bumpMorphStage-${e.id}">
                     <div class="firstyear-tap-zone left" id="bumpMorphTapPrev-${e.id}"></div>
                     <div class="firstyear-tap-zone center" id="bumpMorphTapView-${e.id}"></div>
                     <div class="firstyear-tap-zone right" id="bumpMorphTapNext-${e.id}"></div>
@@ -1234,14 +1232,14 @@ function initFirstYearScrubbers(root) {
   });
 }
 
-// Bump Progression timelapse: a constant slow dissolve — the incoming photo
-// always stacks on top and fades in over ~3s while the outgoing one stays
-// put beneath, so the stage is always mid-morph and never dips to the dark
-// card behind it (the classic two-image crossfade trap). A gentle settle-zoom
-// on each incoming frame adds a bit of life. Manual scrubbing/tapping uses a
-// fast fade instead — a 3s dissolve is lovely on autoplay but miserable when
-// you're dragging through weeks by hand. Autoplay pauses briefly on any
-// manual interaction so the two never fight over the stage.
+// Bump Progression timelapse: a layered "onion-skin" build, not a crossfade.
+// Week by week, each photo dissolves in ON TOP of the stack; once it's fully
+// in, the previous one dims to a faint ghost and the next week begins. So the
+// current week is always crisp while every earlier week lingers as a
+// translucent echo underneath — the belly literally grows as overlapping
+// silhouettes. After the latest week is fully in, everything dissolves out
+// and the cycle restarts from the first photo. Manual scrubbing/tapping snaps
+// fast; autoplay pauses briefly on any interaction so they never fight.
 function initBumpMorphs(root) {
   root.querySelectorAll(".bump-morph").forEach(morph => {
     const entryId = morph.dataset.bumpmorphEntry;
@@ -1249,54 +1247,80 @@ function initBumpMorphs(root) {
     const weeks = entry && entry.weeks ? [...entry.weeks].sort((a, b) => a.week - b.week) : [];
     if (weeks.length < 2) return;
 
-    const imgA = document.getElementById(`bumpMorphImgA-${entryId}`);
-    const imgB = document.getElementById(`bumpMorphImgB-${entryId}`);
+    const stage = document.getElementById(`bumpMorphStage-${entryId}`);
     const captionEl = document.getElementById(`bumpMorphCaption-${entryId}`);
     const track = document.getElementById(`bumpMorphTrack-${entryId}`);
 
-    // Preload every frame so the dissolve never flashes a half-loaded image.
+    // One layer per week, oldest at the bottom. All start transparent.
+    const layers = weeks.map((w, i) => {
+      const img = document.createElement("img");
+      img.className = "firstyear-img";
+      img.src = w.photo.url;
+      img.style.zIndex = i + 1;
+      img.style.opacity = 0;
+      stage.insertBefore(img, stage.firstChild);
+      return img;
+    });
+    // Tap zones must sit above every photo layer.
+    stage.querySelectorAll(".firstyear-tap-zone").forEach(z => { z.style.zIndex = weeks.length + 1; });
+
+    // Preload so a dissolve never flashes a half-loaded image.
     weeks.forEach(w => { const pre = new Image(); pre.src = w.photo.url; });
 
-    const FADE_SLOW_MS = 3000;
-    const FADE_FAST_MS = 300;
-    let activeLayer = "a";
-    let zTop = 1;
+    const GHOST_OPACITY = 0.4;   // how strongly earlier weeks echo underneath
+    const CURRENT_OPACITY = 0.88; // latest week dominates but stays translucent
+                                  // enough for the ghosts to shimmer through
+    const FADE_IN_MS = 2500;     // each week's entrance
+    const FADE_FAST_MS = 300;    // manual scrub/tap
+    const HOLD_END_MS = 2500;    // admire the full stack before resetting
+    const FADE_OUT_MS = 1500;    // everything dissolves before the restart
+
     let pos = 0;
 
-    function showWeek(newPos, fast) {
-      pos = newPos;
-      const showEl = activeLayer === "a" ? imgB : imgA;
-      activeLayer = activeLayer === "a" ? "b" : "a";
-      showEl.style.transitionDuration = (fast ? FADE_FAST_MS : FADE_SLOW_MS) + "ms";
-      showEl.src = weeks[pos].photo.url;
-      showEl.style.zIndex = ++zTop;
-      showEl.style.opacity = 0;
-      showEl.style.transform = fast ? "scale(1)" : "scale(1.06)";
-      // Double rAF: let the browser paint the transparent/zoomed start state
-      // before transitioning to the settled one.
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        showEl.style.opacity = 1;
-        showEl.style.transform = "scale(1)";
-      }));
-      captionEl.textContent = `Week ${weeks[pos].week}`;
+    function applyState(k, ms) {
+      pos = k;
+      layers.forEach((img, i) => {
+        img.style.transitionDuration = ms + "ms";
+        img.style.opacity = i < k ? GHOST_OPACITY : (i === k ? CURRENT_OPACITY : 0);
+      });
+      captionEl.textContent = `Week ${weeks[k].week}`;
       track.querySelectorAll(".firstyear-tick").forEach(t => {
-        t.classList.toggle("current", parseInt(t.dataset.tickPos, 10) === pos);
+        t.classList.toggle("current", parseInt(t.dataset.tickPos, 10) === k);
       });
     }
 
-    // ---- Autoplay: one frame per slow fade = constant motion, no holds ----
-    const AUTOPLAY_MS = FADE_SLOW_MS;
-    let timer = null;
+    // ---- Autoplay: sequential build, hold, dissolve out, restart ----
+    let pending = null;
     let paused = false;
     let resumeTimeout = null;
+    let visible = false;
 
+    function clearPending() {
+      clearTimeout(pending);
+      pending = null;
+    }
+    // From week k: fade it in, wait for that fade to complete, then either
+    // start the next week's entrance or wrap up the cycle and restart.
+    function scheduleStep(k, delay) {
+      clearPending();
+      pending = setTimeout(() => {
+        applyState(k, FADE_IN_MS);
+        if (k < layers.length - 1) {
+          scheduleStep(k + 1, FADE_IN_MS);
+        } else {
+          pending = setTimeout(() => {
+            layers.forEach(img => { img.style.transitionDuration = FADE_OUT_MS + "ms"; img.style.opacity = 0; });
+            pending = setTimeout(() => scheduleStep(0, FADE_IN_MS), FADE_OUT_MS);
+          }, FADE_IN_MS + HOLD_END_MS);
+        }
+      }, delay);
+    }
     function startAutoplay() {
-      if (timer || paused) return;
-      timer = setInterval(() => showWeek((pos + 1) % weeks.length), AUTOPLAY_MS);
+      if (pending || paused || !visible) return;
+      scheduleStep(pos, 0);
     }
     function stopAutoplay() {
-      clearInterval(timer);
-      timer = null;
+      clearPending();
     }
     function userInteracted() {
       paused = true;
@@ -1307,9 +1331,13 @@ function initBumpMorphs(root) {
 
     if ("IntersectionObserver" in window) {
       new IntersectionObserver((entries) => {
-        entries.forEach(en => en.isIntersecting ? startAutoplay() : stopAutoplay());
+        entries.forEach(en => {
+          visible = en.isIntersecting;
+          visible ? startAutoplay() : stopAutoplay();
+        });
       }, { threshold: 0.4 }).observe(morph);
     } else {
+      visible = true;
       startAutoplay();
     }
 
@@ -1318,7 +1346,7 @@ function initBumpMorphs(root) {
       const rect = track.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       const newPos = Math.round(pct * (weeks.length - 1));
-      if (newPos !== pos) showWeek(newPos, true);
+      if (newPos !== pos) applyState(newPos, FADE_FAST_MS);
     }
 
     let dragging = false;
@@ -1342,20 +1370,21 @@ function initBumpMorphs(root) {
     // ---- Tap zones: step at the edges, fullscreen in the center ----
     document.getElementById(`bumpMorphTapPrev-${entryId}`).addEventListener("click", () => {
       userInteracted();
-      if (pos > 0) showWeek(pos - 1, true);
+      if (pos > 0) applyState(pos - 1, FADE_FAST_MS);
     });
     document.getElementById(`bumpMorphTapNext-${entryId}`).addEventListener("click", () => {
       userInteracted();
-      if (pos < weeks.length - 1) showWeek(pos + 1, true);
+      if (pos < weeks.length - 1) applyState(pos + 1, FADE_FAST_MS);
     });
     document.getElementById(`bumpMorphTapView-${entryId}`).addEventListener("click", () => {
       const photosWithCaptions = weeks.map(w => ({ ...w.photo, caption: `Week ${w.week}` }));
       openLightbox(photosWithCaptions, pos, "");
     });
 
-    showWeek(0, true);
+    applyState(0, FADE_FAST_MS);
   });
 }
+
 
 function initBirthdayScrubbers(root) {
   root.querySelectorAll(".birthday-scrubber").forEach(scrubber => {
