@@ -112,7 +112,7 @@ let modalOpenCount = 0;
 let savedScrollY = 0;
 
 function anyOverlayStillOpen() {
-  return !!document.querySelector(".sheet-overlay.open, .lightbox-overlay.open, .slideshow-overlay.open");
+  return !!document.querySelector(".sheet-overlay.open, .lightbox-overlay.open, .slideshow-overlay.open, .birthday-recap-overlay.open");
 }
 
 export function lockBodyScroll() {
