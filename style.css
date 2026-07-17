@@ -527,10 +527,13 @@ input, textarea, select{ font-family: inherit; }
 }
 
 /* Bump Progression: card display */
-.bump-progress-sub{
-  font-size:11.5px; font-weight:600; color: rgba(246,241,231,0.65);
-  text-transform:uppercase; letter-spacing:0.04em; margin-top:2px; margin-bottom:12px;
-}
+/* Timelapse stage reuses the First Year scrubber classes; only the caption
+   needs re-theming for the dark pregnancy card. */
+.bump-morph{ margin: 4px 0 10px; }
+.bump-morph .firstyear-caption{ color: var(--parchment); }
+.bump-morph .firstyear-track::before{ background: rgba(246,241,231,0.25); }
+.bump-morph .firstyear-tick{ background: rgba(246,241,231,0.35); }
+.bump-morph .firstyear-tick.current{ background: var(--rust-soft); }
 .bump-strip{
   display:flex; gap:10px; overflow-x:auto; padding-bottom:2px; scroll-snap-type:x proximity;
 }

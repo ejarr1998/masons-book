@@ -897,10 +897,27 @@ export function renderCard(e) {
                 </ul>`;
       } else if (e.subtype === "bump" && e.weeks && e.weeks.length) {
         const sortedWeeks = [...e.weeks].sort((a, b) => a.week - b.week);
-        const latest = sortedWeeks[sortedWeeks.length - 1];
         const isExpanded = expandedBumpEntries.has(e.id);
+        // With 2+ weeks the card leads with an autoplaying timelapse that
+        // crossfades week → week (reuses the First Year scrubber styles).
+        // The redundant "N updates · latest: week X" line is gone — the week
+        // count lives in the toggle button instead.
+        const morphHtml = sortedWeeks.length >= 2 ? `
+                <div class="bump-morph" data-bumpmorph-entry="${e.id}">
+                  <div class="firstyear-stage">
+                    <img class="firstyear-img" id="bumpMorphImgA-${e.id}" alt="">
+                    <img class="firstyear-img" id="bumpMorphImgB-${e.id}" alt="">
+                    <div class="firstyear-tap-zone left" id="bumpMorphTapPrev-${e.id}"></div>
+                    <div class="firstyear-tap-zone center" id="bumpMorphTapView-${e.id}"></div>
+                    <div class="firstyear-tap-zone right" id="bumpMorphTapNext-${e.id}"></div>
+                  </div>
+                  <div class="firstyear-caption bump-morph-caption" id="bumpMorphCaption-${e.id}"></div>
+                  <div class="firstyear-track" id="bumpMorphTrack-${e.id}">
+                    ${sortedWeeks.map((w, i) => `<div class="firstyear-tick" data-tick-pos="${i}" title="Week ${w.week}"></div>`).join("")}
+                  </div>
+                </div>` : "";
         body = `<div class="card-title">Bump Progression</div>
-                <div class="bump-progress-sub">${sortedWeeks.length} update${sortedWeeks.length === 1 ? "" : "s"} so far · latest: week ${latest.week}</div>
+                ${morphHtml}
                 <div class="bump-strip ${isExpanded ? "expanded" : ""}" id="bumpStrip-${e.id}">
                   ${sortedWeeks.map((w, i) => `
                     <div class="bump-week-thumb" data-bump-entry="${e.id}" data-bump-idx="${i}">
@@ -908,7 +925,7 @@ export function renderCard(e) {
                       <span class="bump-week-badge">Wk ${w.week}</span>
                     </div>`).join("")}
                 </div>
-                <button class="bump-toggle-btn" data-bump-toggle="${e.id}">${isExpanded ? "▴ Show as scroll" : "▾ Show all weeks"}</button>`;
+                <button class="bump-toggle-btn" data-bump-toggle="${e.id}">${isExpanded ? "▴ Show as scroll" : `▾ Show all ${sortedWeeks.length} weeks`}</button>`;
       } else {
         body = `<div class="card-title">${escapeHtml(e.title || "Pregnancy update")}</div>
                 ${e.caption ? `<p class="photo-caption" style="color:rgba(246,241,231,0.85);">${escapeHtml(e.caption)}</p>` : ""}`;
@@ -1049,7 +1066,8 @@ export function bindCardEvents(root) {
       const strip = document.getElementById(`bumpStrip-${entryId}`);
       const isNowExpanded = strip.classList.toggle("expanded");
       if (isNowExpanded) expandedBumpEntries.add(entryId); else expandedBumpEntries.delete(entryId);
-      btn.textContent = isNowExpanded ? "▴ Show as scroll" : "▾ Show all weeks";
+      const weekCount = strip.querySelectorAll(".bump-week-thumb").length;
+      btn.textContent = isNowExpanded ? "▴ Show as scroll" : `▾ Show all ${weekCount} weeks`;
     });
   });
   root.querySelectorAll("[data-trip-open]").forEach(card => {
@@ -1064,6 +1082,7 @@ export function bindCardEvents(root) {
   initThenNowSliders(root);
   initFirstYearScrubbers(root);
   initBirthdayScrubbers(root);
+  initBumpMorphs(root);
   const shuffleBtn = root.querySelector("#onThisDayShuffleBtn");
   if (shuffleBtn) {
     shuffleBtn.addEventListener("click", () => {
@@ -1212,6 +1231,115 @@ function initFirstYearScrubbers(root) {
     });
 
     showMonth(0);
+  });
+}
+
+// Bump Progression timelapse: same crossfade-scrubber mechanics as the First
+// Year card, plus an autoplay loop so the belly "grows" on its own while the
+// card is on screen. Any manual interaction (scrub or tap) pauses the
+// autoplay for a few seconds so the two never fight over the stage.
+function initBumpMorphs(root) {
+  root.querySelectorAll(".bump-morph").forEach(morph => {
+    const entryId = morph.dataset.bumpmorphEntry;
+    const entry = state.entries.find(en => en.id === entryId);
+    const weeks = entry && entry.weeks ? [...entry.weeks].sort((a, b) => a.week - b.week) : [];
+    if (weeks.length < 2) return;
+
+    const imgA = document.getElementById(`bumpMorphImgA-${entryId}`);
+    const imgB = document.getElementById(`bumpMorphImgB-${entryId}`);
+    const captionEl = document.getElementById(`bumpMorphCaption-${entryId}`);
+    const track = document.getElementById(`bumpMorphTrack-${entryId}`);
+
+    // Preload every frame so the crossfade never flashes a half-loaded image.
+    weeks.forEach(w => { const pre = new Image(); pre.src = w.photo.url; });
+
+    let activeLayer = "a";
+    let pos = 0;
+
+    function showWeek(newPos) {
+      pos = newPos;
+      const showEl = activeLayer === "a" ? imgB : imgA;
+      const hideEl = activeLayer === "a" ? imgA : imgB;
+      showEl.src = weeks[pos].photo.url;
+      showEl.classList.add("active");
+      hideEl.classList.remove("active");
+      activeLayer = activeLayer === "a" ? "b" : "a";
+      captionEl.textContent = `Week ${weeks[pos].week}`;
+      track.querySelectorAll(".firstyear-tick").forEach(t => {
+        t.classList.toggle("current", parseInt(t.dataset.tickPos, 10) === pos);
+      });
+    }
+
+    // ---- Autoplay: advance ~1.6s per frame, looping, only while visible ----
+    const AUTOPLAY_MS = 1600;
+    let timer = null;
+    let paused = false;
+    let resumeTimeout = null;
+
+    function startAutoplay() {
+      if (timer || paused) return;
+      timer = setInterval(() => showWeek((pos + 1) % weeks.length), AUTOPLAY_MS);
+    }
+    function stopAutoplay() {
+      clearInterval(timer);
+      timer = null;
+    }
+    function userInteracted() {
+      paused = true;
+      stopAutoplay();
+      clearTimeout(resumeTimeout);
+      resumeTimeout = setTimeout(() => { paused = false; startAutoplay(); }, 8000);
+    }
+
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver((entries) => {
+        entries.forEach(en => en.isIntersecting ? startAutoplay() : stopAutoplay());
+      }, { threshold: 0.4 }).observe(morph);
+    } else {
+      startAutoplay();
+    }
+
+    // ---- Manual scrubbing on the tick track ----
+    function snapToClientX(clientX) {
+      const rect = track.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const newPos = Math.round(pct * (weeks.length - 1));
+      if (newPos !== pos) showWeek(newPos);
+    }
+
+    let dragging = false;
+    track.addEventListener("pointerdown", (ev) => {
+      dragging = true;
+      track.setPointerCapture(ev.pointerId);
+      snapToClientX(ev.clientX);
+      userInteracted();
+      ev.stopPropagation();
+    });
+    track.addEventListener("pointermove", (ev) => {
+      if (!dragging) return;
+      snapToClientX(ev.clientX);
+    });
+    track.addEventListener("pointerup", (ev) => {
+      dragging = false;
+      track.releasePointerCapture(ev.pointerId);
+    });
+    track.addEventListener("pointercancel", () => { dragging = false; });
+
+    // ---- Tap zones: step at the edges, fullscreen in the center ----
+    document.getElementById(`bumpMorphTapPrev-${entryId}`).addEventListener("click", () => {
+      userInteracted();
+      if (pos > 0) showWeek(pos - 1);
+    });
+    document.getElementById(`bumpMorphTapNext-${entryId}`).addEventListener("click", () => {
+      userInteracted();
+      if (pos < weeks.length - 1) showWeek(pos + 1);
+    });
+    document.getElementById(`bumpMorphTapView-${entryId}`).addEventListener("click", () => {
+      const photosWithCaptions = weeks.map(w => ({ ...w.photo, caption: `Week ${w.week}` }));
+      openLightbox(photosWithCaptions, pos, "");
+    });
+
+    showWeek(0);
   });
 }
 
