@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Mason's Book</title>
 <meta name="theme-color" content="#2C3B2E">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Caveat:wght@600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -22,21 +22,39 @@
       <div class="header-sub" id="headerSub">Family Feed</div>
     </div>
     <div style="display:flex; align-items:center; gap:8px;">
-      <button class="icon-btn" id="slideshowBtn" style="position:static; background:var(--parchment-2);" title="Play slideshow">▶️</button>
-      <button class="icon-btn" id="manageKidsBtn" style="display:none; position:static; background:var(--parchment-2);" title="Manage kids">⚙️</button>
+      <button class="icon-btn" id="slideshowBtn" style="position:static; background:var(--parchment-2);" title="Play slideshow" aria-label="Play slideshow"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="7 4 20 12 7 20 7 4"/></svg></button>
+      <button class="icon-btn" id="manageKidsBtn" style="display:none; position:static; background:var(--parchment-2);" title="Manage kids" aria-label="Manage kids"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
       <div class="mode-badge" id="modeBadge">View mode</div>
     </div>
   </div>
 
+  <!-- COUNTDOWN BANNER: weeks-to-go ribbon, flips to age after birth -->
+  <div class="countdown-banner" id="countdownBanner" style="display:none;"></div>
+
   <!-- FEED -->
   <div class="feed" id="feed">
-    <div class="loading-msg">Loading moments…</div>
+    <div class="skeleton-card">
+      <div class="skeleton sk-hero"></div>
+      <div class="sk-lines">
+        <div class="skeleton sk-line w40"></div>
+        <div class="skeleton sk-line w90"></div>
+        <div class="skeleton sk-line w60"></div>
+      </div>
+    </div>
+    <div class="skeleton-card">
+      <div class="skeleton sk-hero"></div>
+      <div class="sk-lines">
+        <div class="skeleton sk-line w40"></div>
+        <div class="skeleton sk-line w90"></div>
+        <div class="skeleton sk-line w60"></div>
+      </div>
+    </div>
   </div>
 
   <!-- FAB cluster: tap the + to reveal Filters and Add Entry. Add Entry only shows in edit mode. -->
   <div class="fab-cluster" id="fabCluster">
-    <button class="fab-mini" id="fabFilterMini" title="Filters">🔍</button>
-    <button class="fab-mini" id="fabAddMini" title="Add entry" style="display:none;">✏️</button>
+    <button class="fab-mini" id="fabFilterMini" title="Filters" aria-label="Filters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
+    <button class="fab-mini" id="fabAddMini" title="Add entry" aria-label="Add entry" style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>
     <button class="fab" id="fab" title="Menu">
       <span class="fab-plus">+</span>
       <span class="fab-badge" id="fabBadge" style="display:none;"></span>
@@ -80,8 +98,8 @@
   <button class="lightbox-nav next" id="lightboxNext">›</button>
   <div class="lightbox-caption" id="lightboxCaption"></div>
   <div class="lightbox-actions">
-    <button class="lightbox-download" id="lightboxTagsBtn">🏷️ Show tags</button>
-    <button class="lightbox-download" id="lightboxDownload">⬇ Save photo</button>
+    <button class="lightbox-download" id="lightboxTagsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg><span>Show tags</span></button>
+    <button class="lightbox-download" id="lightboxDownload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg><span>Save photo</span></button>
   </div>
 </div>
 
@@ -104,15 +122,15 @@
 
 <!-- SLIDESHOW -->
 <div class="slideshow-overlay" id="slideshowOverlay">
-  <button class="slideshow-minimal-toggle" id="slideshowMinimalToggle" title="Toggle distraction-free view">⛶</button>
+  <button class="slideshow-minimal-toggle" id="slideshowMinimalToggle" title="Toggle distraction-free view" aria-label="Toggle distraction-free view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
   <button class="slideshow-minimal-close" id="slideshowMinimalClose" title="Close">×</button>
   <div class="slideshow-top">
     <div class="slideshow-progress-track"><div class="slideshow-progress-fill" id="slideshowProgressFill"></div></div>
     <div class="slideshow-top-row">
       <span class="slideshow-counter" id="slideshowCounter"></span>
       <div class="slideshow-top-actions">
-        <button class="slideshow-icon-btn" id="slideshowShuffleBtn" title="Shuffle">🔀</button>
-        <button class="slideshow-icon-btn" id="slideshowPauseBtn" title="Pause">⏸</button>
+        <button class="slideshow-icon-btn" id="slideshowShuffleBtn" title="Shuffle" aria-label="Shuffle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/></svg></button>
+        <button class="slideshow-icon-btn" id="slideshowPauseBtn" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></button>
         <button class="slideshow-icon-btn" id="slideshowClose" title="Close">×</button>
       </div>
     </div>
