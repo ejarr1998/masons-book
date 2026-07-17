@@ -97,6 +97,7 @@ let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
 let editingPhotos = []; // existing photos on the entry currently being added/edited (removable)
 let removedPhotoPaths = []; // storage paths to actually delete once the save succeeds
+let newUploadPathsThisSave = []; // paths uploaded during the current save attempt — cleaned up if the save fails partway through
 let pendingPhotoMeta = []; // {location, people} kept index-aligned with pendingPhotos
 let thenNowPending = { then: null, now: null }; // staged Files for the Then/Now slider, keyed by side
 let thenNowExisting = { then: null, now: null }; // already-uploaded {url, path} photos when editing
@@ -357,13 +358,7 @@ function renderActiveFilterBar() {
 function renderCountdownBanner() {
   const el = document.getElementById("countdownBanner");
   if (!el) return;
-  // Same rule as On This Day: the countdown only belongs on the fully
-  // unfiltered family view. Any active filter (kid, category, date, or tag —
-  // e.g. tapping a hashtag) means the person is deliberately looking at a
-  // narrow slice, and the arrival countdown has no bearing on that slice.
-  const anyFilterActive = activeKidFilter !== "all" || activeCategoryFilter !== "all" ||
-    activeYearFilter !== "all" || activeMonthFilter !== "all" || activeTagFilters.length > 0;
-  if (anyFilterActive || KIDS.length === 0) {
+  if (activeKidFilter !== "all" || KIDS.length === 0) {
     el.style.display = "none";
     return;
   }
@@ -2141,6 +2136,12 @@ function addBumpWeekRow(week, date, existingPhoto) {
   fileInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    // A new file supersedes whatever existing photo was here — queue the old
+    // Storage file for cleanup once the save actually succeeds.
+    if (rowData.existingPhoto && rowData.existingPhoto.path) {
+      removedPhotoPaths.push(rowData.existingPhoto.path);
+      rowData.existingPhoto = null;
+    }
     rowData.pendingFile = file;
     photoSlot.classList.remove("photo-selected-no-preview");
     previewImg.onerror = () => {
@@ -2162,9 +2163,11 @@ function addBumpWeekRow(week, date, existingPhoto) {
 
   row.querySelector(".bump-week-remove").addEventListener("click", () => {
     if (container.querySelectorAll(".bump-week-row").length > 1) {
+      if (rowData.existingPhoto && rowData.existingPhoto.path) removedPhotoPaths.push(rowData.existingPhoto.path);
       row.remove();
       bumpWeekRows[rowIndex] = null; // keep indices stable; filtered out on collect
     } else {
+      if (rowData.existingPhoto && rowData.existingPhoto.path) removedPhotoPaths.push(rowData.existingPhoto.path);
       row.querySelector(".bumpRowWeek").value = "";
       row.querySelector(".bumpRowDate").value = "";
       rowData.week = ""; rowData.date = ""; rowData.existingPhoto = null; rowData.pendingFile = null;
@@ -2222,6 +2225,10 @@ function bindThenNowSlot(side) {
   fileInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (thenNowExisting[side] && thenNowExisting[side].path) {
+      removedPhotoPaths.push(thenNowExisting[side].path);
+      thenNowExisting[side] = null;
+    }
     thenNowPending[side] = file;
     thenNowFocal[side] = { x: 50, y: 50 }; // a new photo resets any prior repositioning
     previewImg.onerror = () => {
@@ -2274,6 +2281,10 @@ function initFirstYearFields() {
     fileInput.addEventListener("change", (e) => {
       const file = e.target.files[0];
       if (!file) return;
+      if (firstYearExisting[m.idx] && firstYearExisting[m.idx].path) {
+        removedPhotoPaths.push(firstYearExisting[m.idx].path);
+        firstYearExisting[m.idx] = null;
+      }
       firstYearPending[m.idx] = file;
       previewImg.onerror = () => { previewImg.style.display = "none"; };
       if (isHeicFile(file)) {
@@ -2852,6 +2863,7 @@ async function saveEntry() {
   const btn = document.getElementById("saveEntryBtn");
   btn.disabled = true;
   btn.textContent = "Saving...";
+  newUploadPathsThisSave = [];
 
   try {
     const selectedKids = Array.from(document.querySelectorAll("#kidChips .chip.selected")).map(c => c.dataset.kid);
@@ -2987,6 +2999,16 @@ async function saveEntry() {
   } catch (err) {
     console.error("Save error:", err);
     showToast("Something went wrong — try again");
+    // If photos made it to Storage this attempt but the entry itself never
+    // saved (or a later step in the switch threw), those files are orphaned
+    // — nothing in Firestore will ever reference them. Clean them up rather
+    // than leaving dead weight in the bucket.
+    if (newUploadPathsThisSave.length > 0) {
+      Promise.all(newUploadPathsThisSave.map(path =>
+        deleteObject(ref(storage, path)).catch(e => console.warn("Storage cleanup skipped for", path, e))
+      ));
+      newUploadPathsThisSave = [];
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = "Save";
@@ -3002,6 +3024,10 @@ async function uploadPhotos(files) {
     const storageRef = ref(storage, filename);
     await uploadBytes(storageRef, compressed);
     const url = await getDownloadURL(storageRef);
+    // Tracked here (not just by the caller) so that if a later file in this
+    // same batch fails, or the entry save itself fails afterward, files that
+    // did make it to Storage still get cleaned up instead of orphaned.
+    newUploadPathsThisSave.push(filename);
     results.push({ url, path: filename });
   }
   return results;
@@ -3031,10 +3057,35 @@ function compressImage(file, maxDim = 1600, quality = 0.82) {
   });
 }
 
+// Entries can carry photos in several different shapes depending on type:
+// a flat `photos` array (photo/milestone/birthday/etc.), `weeks` (bump
+// progression), `months` (first year), or `thenPhoto`/`nowPhoto` (then-vs-now).
+// This walks all of them so a full entry delete can clean up every file it owns.
+function collectEntryPhotoPaths(entry) {
+  const paths = [];
+  (entry.photos || []).forEach(p => { if (p && p.path) paths.push(p.path); });
+  (entry.weeks || []).forEach(w => { if (w.photo && w.photo.path) paths.push(w.photo.path); });
+  (entry.months || []).forEach(m => { if (m.photo && m.photo.path) paths.push(m.photo.path); });
+  if (entry.thenPhoto && entry.thenPhoto.path) paths.push(entry.thenPhoto.path);
+  if (entry.nowPhoto && entry.nowPhoto.path) paths.push(entry.nowPhoto.path);
+  return paths;
+}
+
 function confirmDelete(entryId) {
+  const entry = state.entries.find(e => e.id === entryId);
   if (confirm("Delete this entry? This can't be undone.")) {
+    const photoPaths = entry ? collectEntryPhotoPaths(entry) : [];
     deleteDoc(doc(db, "entries", entryId))
-      .then(() => showToast("Deleted"))
+      .then(() => {
+        showToast("Deleted");
+        // Best-effort Storage cleanup, same as the photo-removal path above —
+        // failures here just mean an orphaned file, never a broken reference.
+        if (photoPaths.length > 0) {
+          Promise.all(photoPaths.map(path =>
+            deleteObject(ref(storage, path)).catch(err => console.warn("Storage cleanup skipped for", path, err))
+          ));
+        }
+      })
       .catch(err => { console.error(err); showToast("Couldn't delete — try again"); });
   }
 }
