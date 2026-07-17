@@ -725,19 +725,29 @@ input, textarea, select{ font-family: inherit; }
 .on-this-day-wrap{
   border-radius:20px; border: 1px dashed var(--rust-soft);
   background: linear-gradient(180deg, rgba(178,83,46,0.10), rgba(178,83,46,0) 70%);
-  padding: 14px 14px 0;
+  padding: 12px 12px 0;
+  overflow: hidden;
+  animation: onThisDayIn 0.45s ease both;
+}
+@keyframes onThisDayIn{
+  from{ opacity:0; transform: translateY(-8px); }
+  to{ opacity:1; transform: none; }
 }
 .on-this-day-header{
-  display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  margin: -12px -12px 12px; padding: 11px 14px;
+  background: linear-gradient(120deg, var(--rust) 0%, var(--rust-soft) 100%);
 }
 .on-this-day-ribbon{
-  font-size:12px; font-weight:700; color: var(--rust); text-transform:uppercase; letter-spacing:0.03em;
+  font-family:'Caveat', cursive; font-weight:700; font-size:21px; line-height:1.1;
+  color: var(--parchment); letter-spacing:0.01em; text-transform:none;
 }
 .on-this-day-shuffle{
-  font-size:11.5px; font-weight:700; color: var(--ink-soft); background: var(--parchment-2);
-  border:1px solid var(--taupe); border-radius:100px; padding:5px 11px; cursor:pointer; flex-shrink:0;
+  font-size:11.5px; font-weight:700; color: var(--parchment);
+  background: rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.38);
+  border-radius:100px; padding:5px 11px; cursor:pointer; flex-shrink:0;
 }
-.on-this-day-shuffle:active{ background: var(--taupe); }
+.on-this-day-shuffle:active{ background: rgba(255,255,255,0.32); }
 
 /* Trip card: collapses all of a trip's entries into one grouped card */
 .trip-card{ cursor:pointer; }
