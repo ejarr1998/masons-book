@@ -5,6 +5,7 @@
 // ============================================================
 
 import { parseLocalDate, showToast, lockBodyScroll, unlockBodyScroll } from "./utils.js";
+import { icon } from "./icons.js";
 
 let slideshowPhotos = []; // master list, chronological — never reordered, even in shuffle mode
 let slideshowSourceEntries = [];
@@ -60,7 +61,7 @@ export function openSlideshow(sourceEntries) {
   document.getElementById("slideshowImgA").classList.remove("active");
   document.getElementById("slideshowImgB").classList.remove("active");
   document.getElementById("slideshowShuffleBtn").classList.remove("active");
-  document.getElementById("slideshowPauseBtn").textContent = "⏸";
+  document.getElementById("slideshowPauseBtn").innerHTML = icon("pause");
 
   document.getElementById("slideshowOverlay").classList.remove("minimal");
   document.getElementById("slideshowOverlay").classList.add("open");
@@ -152,7 +153,7 @@ function startSlideshowTimer() {
 
 function toggleSlideshowPause() {
   slideshowPaused = !slideshowPaused;
-  document.getElementById("slideshowPauseBtn").textContent = slideshowPaused ? "▶" : "⏸";
+  document.getElementById("slideshowPauseBtn").innerHTML = slideshowPaused ? icon("play") : icon("pause");
   startSlideshowTimer();
 }
 
