@@ -1194,37 +1194,53 @@ function initBirthdayScrubbers(root) {
 
 function openBirthdayRecap(kidId, birthdayNum) {
   renderBirthdayRecap(kidId, birthdayNum);
-  document.getElementById("addSheetOverlay").classList.add("open");
+  document.getElementById("birthdayRecapOverlay").classList.add("open");
   lockBodyScroll();
 }
 
+function closeBirthdayRecap() {
+  document.getElementById("birthdayRecapOverlay").classList.remove("open");
+  unlockBodyScroll();
+}
+
 function renderBirthdayRecap(kidId, birthdayNum) {
-  const content = document.getElementById("addSheetContent");
+  const content = document.getElementById("birthdayRecapScroll");
   const kid = KIDS.find(k => k.id === kidId);
   const birthdayEntries = state.entries
     .filter(e => e.category === "birthday" && e.kids && e.kids[0] === kidId)
     .sort((a, b) => (parseInt(a.birthdayNum, 10) || 0) - (parseInt(b.birthdayNum, 10) || 0));
   const idx = birthdayEntries.findIndex(e => String(e.birthdayNum) === String(birthdayNum));
-  const entry = idx >= 0 ? birthdayEntries[idx] : birthdayEntries[0];
-  if (!entry) { closeAddSheet(); return; }
+  const safeIdx = idx >= 0 ? idx : 0;
+  const entry = birthdayEntries[safeIdx];
+  if (!entry) { closeBirthdayRecap(); return; }
 
   const photos = entry.photos || [];
   const coverUrl = photos.length ? photos[0].url : "";
-  const hasPrev = idx > 0;
-  const hasNext = idx >= 0 && idx < birthdayEntries.length - 1;
+  const hasPrev = safeIdx > 0;
+  const hasNext = safeIdx < birthdayEntries.length - 1;
 
   content.innerHTML = `
-    <div class="birthday-recap">
-      ${coverUrl
-        ? `<div class="birthday-recap-hero" style="background-image:url('${coverUrl}')"></div>`
-        : `<div class="birthday-recap-hero birthday-recap-hero-empty">🎂</div>`}
-      <div class="birthday-recap-body">
-        <div class="birthday-recap-title">🎉 ${escapeHtml(kid ? kid.name : "")} turned ${escapeHtml(entry.birthdayNum || "?")}!</div>
-        ${entry.theme ? `<div class="birthday-recap-theme">${escapeHtml(entry.theme)}</div>` : ""}
-        <div class="birthday-recap-meta-row">
-          <span>${formatDate(entry.date)}</span>
-          ${entry.location ? `<span>📍 ${escapeHtml(entry.location)}</span>` : ""}
+    <div class="birthday-recap-full">
+      <div class="birthday-recap-hero ${coverUrl ? "" : "birthday-recap-hero-empty"}" ${coverUrl ? `style="background-image:url('${coverUrl}')"` : ""}>
+        ${coverUrl ? "" : `<div class="birthday-recap-hero-emoji">🎂</div>`}
+        ${birthdayEntries.length > 1 ? `<div class="birthday-recap-counter">${safeIdx + 1} of ${birthdayEntries.length}</div>` : ""}
+        ${hasPrev ? `<button class="birthday-recap-hero-nav prev" id="recapPrevBtn" aria-label="Previous birthday">‹</button>` : ""}
+        ${hasNext ? `<button class="birthday-recap-hero-nav next" id="recapNextBtn" aria-label="Next birthday">›</button>` : ""}
+        ${state.isEditMode ? `
+          <div class="birthday-recap-hero-actions">
+            <button class="birthday-recap-hero-action" id="recapEditBtn" aria-label="Edit birthday">${icon("pencil")}</button>
+            <button class="birthday-recap-hero-action" id="recapDeleteBtn" aria-label="Delete birthday">${icon("trash")}</button>
+          </div>` : ""}
+        <div class="birthday-recap-hero-content">
+          <div class="birthday-recap-title">🎉 ${escapeHtml(kid ? kid.name : "")} turned ${escapeHtml(entry.birthdayNum || "?")}!</div>
+          <div class="birthday-recap-hero-meta">
+            ${entry.theme ? `<span class="birthday-recap-theme">${escapeHtml(entry.theme)}</span>` : ""}
+            <span class="birthday-recap-meta">${formatDate(entry.date)}</span>
+            ${entry.location ? `<span class="birthday-recap-meta">📍 ${escapeHtml(entry.location)}</span>` : ""}
+          </div>
         </div>
+      </div>
+      <div class="birthday-recap-body">
         ${entry.note ? `<p class="birthday-recap-note">${escapeHtml(entry.note)}</p>` : ""}
         ${entry.attendees && entry.attendees.length ? `
           <div class="birthday-recap-section">
@@ -1239,39 +1255,31 @@ function renderBirthdayRecap(kidId, birthdayNum) {
         ${photos.length ? `
           <div class="birthday-recap-section">
             <div class="birthday-recap-section-title">Photos</div>
-            <div class="birthday-recap-gallery">
+            <div class="birthday-recap-gallery ${photos.length >= 3 ? "mosaic" : ""}">
               ${photos.map((p, i) => `<div class="birthday-recap-gallery-tile" data-lightbox="${entry.id}" data-idx="${i}"><img src="${p.url}" alt=""></div>`).join("")}
             </div>
           </div>` : ""}
-        ${state.isEditMode ? `
-          <div class="birthday-recap-actions">
-            <button type="button" class="btn-secondary" id="recapEditBtn">✎ Edit this birthday</button>
-            <button type="button" class="btn-secondary danger" id="recapDeleteBtn">🗑 Delete</button>
-          </div>` : ""}
-      </div>
-      <div class="birthday-recap-nav">
-        <button type="button" class="btn-secondary" id="recapPrevBtn" ${hasPrev ? "" : "disabled"}>‹ Previous</button>
-        <button type="button" class="btn-secondary" id="recapCloseBtn">Close</button>
-        <button type="button" class="btn-secondary" id="recapNextBtn" ${hasNext ? "" : "disabled"}>Next ›</button>
       </div>
     </div>
   `;
+  content.scrollTop = 0; // switching birthdays always lands back at the hero
 
   bindCardEvents(content); // wires up the [data-lightbox] gallery tiles
-  document.getElementById("recapCloseBtn").addEventListener("click", closeAddSheet);
   if (hasPrev) {
     document.getElementById("recapPrevBtn").addEventListener("click", () => {
-      renderBirthdayRecap(kidId, birthdayEntries[idx - 1].birthdayNum);
+      renderBirthdayRecap(kidId, birthdayEntries[safeIdx - 1].birthdayNum);
     });
   }
   if (hasNext) {
     document.getElementById("recapNextBtn").addEventListener("click", () => {
-      renderBirthdayRecap(kidId, birthdayEntries[idx + 1].birthdayNum);
+      renderBirthdayRecap(kidId, birthdayEntries[safeIdx + 1].birthdayNum);
     });
   }
   if (state.isEditMode) {
-    document.getElementById("recapEditBtn").addEventListener("click", () => openEditSheet(entry.id));
-    document.getElementById("recapDeleteBtn").addEventListener("click", () => confirmDelete(entry.id));
+    // The entry form opens in the shared sheet, which sits *below* this
+    // overlay — so leave full-screen mode first or the form would be hidden.
+    document.getElementById("recapEditBtn").addEventListener("click", () => { closeBirthdayRecap(); openEditSheet(entry.id); });
+    document.getElementById("recapDeleteBtn").addEventListener("click", () => { closeBirthdayRecap(); confirmDelete(entry.id); });
   }
 }
 
@@ -2893,6 +2901,13 @@ function bindGlobalEvents() {
   document.getElementById("lightboxTagsBtn").addEventListener("click", () => {
     lightboxTagsVisible = !lightboxTagsVisible;
     updateLightbox();
+  });
+
+  document.getElementById("birthdayRecapClose").addEventListener("click", closeBirthdayRecap);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.getElementById("birthdayRecapOverlay").classList.contains("open")) {
+      closeBirthdayRecap();
+    }
   });
 }
 
