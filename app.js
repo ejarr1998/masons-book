@@ -390,6 +390,19 @@ function openFiltersSheet() {
   lockBodyScroll();
 }
 
+function filterByTag(tagId) {
+  activeKidFilter = "all";
+  activeCategoryFilter = "all";
+  activeYearFilter = "all";
+  activeMonthFilter = "all";
+  activeTagFilters = [tagId];
+  expandedFilterSections.tags = true;
+  updateHeaderSub();
+  updateFiltersButtonBadge();
+  renderFeed();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function peopleSummary() {
   if (activeKidFilter === "all") return "Family";
   const k = KIDS.find(k => k.id === activeKidFilter);
@@ -894,7 +907,7 @@ export function renderCard(e) {
         ${kidsTxt ? `<div class="card-kids" style="margin-top:8px;">${escapeHtml(kidsTxt)}</div>` : ""}
         ${(e.tags && e.tags.length) ? `<div class="entry-tags">${e.tags.map(tid => {
           const t = TAGS.find(x => x.id === tid);
-          return t ? `<span class="entry-tag-pill">${t.isPrivate ? "🔒" : "#"}${escapeHtml(t.name)}</span>` : "";
+          return t ? `<button type="button" class="entry-tag-pill" data-filter-tag="${t.id}">${t.isPrivate ? "🔒" : "#"}${escapeHtml(t.name)}</button>` : "";
         }).join("")}</div>` : ""}
       </div>
     </div>`;
@@ -958,6 +971,12 @@ export function bindCardEvents(root) {
   });
   root.querySelectorAll("[data-trip-open]").forEach(card => {
     card.addEventListener("click", () => openTripDetail(card.dataset.tripOpen));
+  });
+  root.querySelectorAll("[data-filter-tag]").forEach(pill => {
+    pill.addEventListener("click", (e) => {
+      e.stopPropagation();
+      filterByTag(pill.dataset.filterTag);
+    });
   });
   initThenNowSliders(root);
   initFirstYearScrubbers(root);

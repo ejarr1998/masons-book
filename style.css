@@ -357,12 +357,20 @@ input, textarea, select{ font-family: inherit; }
 
 .entry-tags{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .entry-tag-pill{
-  font-size:11.5px; font-weight:600; color: var(--ink-soft); background: var(--parchment-2);
-  padding: 3px 9px; border-radius:100px;
+  font-family: inherit; font-size:11.5px; font-weight:600; color: var(--ink-soft); background: var(--parchment-2);
+  padding: 3px 9px; border-radius:100px; cursor:pointer; border:none; outline:none; -webkit-appearance:none; appearance:none;
+  transition: background 0.15s, color 0.15s;
+}
+.entry-tag-pill:hover, .entry-tag-pill:active{
+  background: var(--rust); color: var(--white);
 }
 .card.milestone .entry-tag-pill, .card.birthday .entry-tag-pill, .card.pregnancy .entry-tag-pill,
 .card.birth .entry-tag-pill, .card.funnything .entry-tag-pill{
   background: rgba(246,241,231,0.18); color: rgba(246,241,231,0.85);
+}
+.card.milestone .entry-tag-pill:hover, .card.birthday .entry-tag-pill:hover, .card.pregnancy .entry-tag-pill:hover,
+.card.birth .entry-tag-pill:hover, .card.funnything .entry-tag-pill:hover{
+  background: var(--rust); color: var(--white);
 }
 
 .quote-lines-editor{ display:flex; flex-direction:column; gap:10px; margin: 4px 0 10px; }
