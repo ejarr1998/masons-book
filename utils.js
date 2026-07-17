@@ -110,6 +110,11 @@ export function showToast(msg) {
 
 let modalOpenCount = 0;
 let savedScrollY = 0;
+
+function anyOverlayStillOpen() {
+  return !!document.querySelector(".sheet-overlay.open, .lightbox-overlay.open, .slideshow-overlay.open");
+}
+
 export function lockBodyScroll() {
   if (modalOpenCount === 0) {
     // Pinning the body via position:fixed (rather than just overflow:hidden)
@@ -126,7 +131,12 @@ export function lockBodyScroll() {
 }
 export function unlockBodyScroll() {
   modalOpenCount = Math.max(0, modalOpenCount - 1);
-  if (modalOpenCount === 0) {
+  // Belt-and-suspenders: if the manual counter ever drifts out of sync with
+  // reality (an edge case skipped its matching lock/unlock call somewhere),
+  // checking the actual DOM state means the page can't get permanently stuck
+  // unscrollable — it self-corrects the moment anything calls unlock again.
+  if (modalOpenCount === 0 || !anyOverlayStillOpen()) {
+    modalOpenCount = 0;
     document.body.style.position = "";
     document.body.style.top = "";
     document.body.style.left = "";
