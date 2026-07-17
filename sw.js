@@ -1,4 +1,4 @@
-const CACHE_NAME = "jarrett-book-v2";
+const CACHE_NAME = "jarrett-book-v3"; // bumped for the safe-area / icons / countdown update
 const SHELL_FILES = [
   "./",
   "./index.html",
