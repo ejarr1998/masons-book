@@ -358,7 +358,13 @@ function renderActiveFilterBar() {
 function renderCountdownBanner() {
   const el = document.getElementById("countdownBanner");
   if (!el) return;
-  if (activeKidFilter !== "all" || KIDS.length === 0) {
+  // Same rule as On This Day: the countdown only belongs on the fully
+  // unfiltered family view. Any active filter (kid, category, date, or tag —
+  // e.g. tapping a hashtag) means the person is deliberately looking at a
+  // narrow slice, and the arrival countdown has no bearing on that slice.
+  const anyFilterActive = activeKidFilter !== "all" || activeCategoryFilter !== "all" ||
+    activeYearFilter !== "all" || activeMonthFilter !== "all" || activeTagFilters.length > 0;
+  if (anyFilterActive || KIDS.length === 0) {
     el.style.display = "none";
     return;
   }
