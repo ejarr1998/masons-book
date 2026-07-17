@@ -3533,30 +3533,40 @@ function friendlyPhotoBaseName(entry, contextLabel) {
   return parts.join("_");
 }
 
+// Groups photos into <year>/<category> folders — year first, since browsing
+// a family archive chronologically is the most natural lens, with category
+// as the next-most-useful narrowing (e.g. 2026/sonogram, 2026/birthday).
+function photoFolderPath(entry) {
+  const year = entry.date && /^\d{4}/.test(entry.date) ? entry.date.slice(0, 4) : "no-date";
+  const catSlug = slugify(CATEGORIES[entry.category]?.label || entry.category || "entry");
+  return `${year}/${catSlug}`;
+}
+
 function collectEntryPhotoRefs(entry) {
   const refs = [];
+  const folder = photoFolderPath(entry);
   const generalPhotos = entry.photos || [];
   generalPhotos.forEach((p, i) => {
     if (p && p.path && p.url) {
       const context = generalPhotos.length > 1 ? String(i + 1) : "";
-      refs.push({ path: p.path, url: p.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, context) });
+      refs.push({ path: p.path, url: p.url, entryId: entry.id, folder, friendlyBase: friendlyPhotoBaseName(entry, context) });
     }
   });
   (entry.weeks || []).forEach(w => {
     if (w.photo && w.photo.path && w.photo.url) {
-      refs.push({ path: w.photo.path, url: w.photo.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, `week${w.week}`) });
+      refs.push({ path: w.photo.path, url: w.photo.url, entryId: entry.id, folder, friendlyBase: friendlyPhotoBaseName(entry, `week${w.week}`) });
     }
   });
   (entry.months || []).forEach(m => {
     if (m.photo && m.photo.path && m.photo.url) {
-      refs.push({ path: m.photo.path, url: m.photo.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, slugify(m.label) || `month${m.monthIndex}`) });
+      refs.push({ path: m.photo.path, url: m.photo.url, entryId: entry.id, folder, friendlyBase: friendlyPhotoBaseName(entry, slugify(m.label) || `month${m.monthIndex}`) });
     }
   });
   if (entry.thenPhoto && entry.thenPhoto.path && entry.thenPhoto.url) {
-    refs.push({ path: entry.thenPhoto.path, url: entry.thenPhoto.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, "then") });
+    refs.push({ path: entry.thenPhoto.path, url: entry.thenPhoto.url, entryId: entry.id, folder, friendlyBase: friendlyPhotoBaseName(entry, "then") });
   }
   if (entry.nowPhoto && entry.nowPhoto.path && entry.nowPhoto.url) {
-    refs.push({ path: entry.nowPhoto.path, url: entry.nowPhoto.url, entryId: entry.id, friendlyBase: friendlyPhotoBaseName(entry, "now") });
+    refs.push({ path: entry.nowPhoto.path, url: entry.nowPhoto.url, entryId: entry.id, folder, friendlyBase: friendlyPhotoBaseName(entry, "now") });
   }
   return refs;
 }
@@ -3602,8 +3612,9 @@ async function renderBackupSheet() {
     <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">
       This downloads everything — every entry, kid profile, tag, trip, and photo — into a single .zip
       file, entirely separate from Firebase. Save it to Google Drive, an external drive, wherever feels
-      safe. Photos are named by date, type, and who/what they're of (e.g. <em>2026-03-15_sonogram_mason_20-week-scan.jpg</em>)
-      instead of a random ID, so the folder actually means something if you ever browse it directly.
+      safe. Photos are grouped into year/category folders (e.g. <em>2026/sonogram/</em>) and named by
+      date, type, and who/what they're of (e.g. <em>2026-03-15_sonogram_mason_20-week-scan.jpg</em>)
+      instead of a random ID, so the whole thing actually makes sense if you ever browse it directly.
       Nothing in the app changes; this only reads and packages what's already there.
     </p>
     <button class="btn-primary" id="fullBackupBtn">Download full backup (with photos)</button>
@@ -3652,22 +3663,24 @@ async function runBackup(includePhotos) {
           const resp = await fetch(refs[i].url);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const blob = await resp.blob();
-          // Descriptive filenames (date_category_kid_detail) instead of the
-          // raw Storage path, so browsing the zip's photos/ folder actually
-          // means something — and since the date leads, it sorts
-          // chronologically for free. Fall back + de-dupe if two photos
-          // would otherwise land on the exact same name.
+          // Descriptive filenames (date_category_kid_detail), grouped into
+          // <year>/<category> folders, instead of a flat dump of raw Storage
+          // paths — so browsing the zip actually means something. Since the
+          // date leads each filename too, everything sorts chronologically
+          // within its folder for free. De-dupe if two photos would
+          // otherwise land on the exact same folder+name.
           const ext = (refs[i].path.split(".").pop() || "jpg").toLowerCase();
           const base = refs[i].friendlyBase || "photo";
+          const folder = refs[i].folder || "misc";
           let filename = `${base}.${ext}`;
           let attempt = 2;
-          while (usedNames.has(filename)) {
+          while (usedNames.has(`${folder}/${filename}`)) {
             filename = `${base}-${attempt}.${ext}`;
             attempt++;
           }
-          usedNames.add(filename);
-          zip.file(`photos/${filename}`, blob);
-          photoIndex.push({ filename, originalPath: refs[i].path, entryId: refs[i].entryId });
+          usedNames.add(`${folder}/${filename}`);
+          zip.file(`photos/${folder}/${filename}`, blob);
+          photoIndex.push({ filename: `${folder}/${filename}`, originalPath: refs[i].path, entryId: refs[i].entryId });
         } catch (err) {
           // A single missing/broken photo shouldn't sink the whole backup —
           // log it and keep going with everything else.
