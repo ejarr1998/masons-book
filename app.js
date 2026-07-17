@@ -18,6 +18,7 @@ import {
   lockBodyScroll, unlockBodyScroll
 } from "./utils.js";
 import { openSlideshow, initSlideshow } from "./slideshow.js";
+import { icon } from "./icons.js";
 import { state } from "./state.js";
 import { db, storage, auth } from "./firebase.js";
 import {
@@ -313,6 +314,55 @@ function updateHeaderSub() {
     const kid = KIDS.find(k => k.id === activeKidFilter);
     sub.textContent = kid ? `${kid.name}'s Book` : "Feed";
   }
+  renderCountdownBanner();
+}
+
+// ---- Countdown banner: weeks until arrival, flipping to age after birth ----
+// Like On This Day, this belongs to the unfiltered family view — a per-kid
+// filtered feed is a deliberate narrow slice.
+function renderCountdownBanner() {
+  const el = document.getElementById("countdownBanner");
+  if (!el) return;
+  if (activeKidFilter !== "all" || KIDS.length === 0) {
+    el.style.display = "none";
+    return;
+  }
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const lines = [];
+  for (const k of KIDS) {
+    if (!k.birthdate) continue;
+    const due = parseLocalDate(k.birthdate);
+    if (isNaN(due)) continue;
+    const days = Math.round((due - today) / 86400000);
+    if (days > 1) {
+      const main = days <= 13
+        ? `${k.name} arrives in ${days} days!`
+        : `${k.name} arrives in ~${Math.round(days / 7)} weeks`;
+      lines.push({ emoji: "🍼", main, sub: `Due ${formatDate(k.birthdate)}` });
+    } else if (days === 1) {
+      lines.push({ emoji: "🎉", main: `${k.name} arrives tomorrow!`, sub: `Due ${formatDate(k.birthdate)}` });
+    } else if (days === 0) {
+      lines.push({ emoji: "🎉", main: `${k.name} is due today!`, sub: "Any moment now…" });
+    } else if (days >= -84) {
+      // First ~12 weeks after the birth, the banner flips to celebrating his age.
+      lines.push({ emoji: "👶", main: `${k.name} is ${calcAge(k.birthdate, todayStr)}`, sub: `Born ${formatDate(k.birthdate)}` });
+    }
+  }
+  if (lines.length === 0) {
+    el.style.display = "none";
+    return;
+  }
+  el.innerHTML = lines.map(l => `
+    <div class="countdown-row">
+      <span class="countdown-emoji">${l.emoji}</span>
+      <span class="countdown-lines">
+        <span class="countdown-main">${escapeHtml(l.main)}</span>
+        <span class="countdown-sub">${escapeHtml(l.sub)}</span>
+      </span>
+    </div>`).join("");
+  el.style.display = "flex";
 }
 
 
@@ -571,7 +621,14 @@ export function renderFeed() {
   }
 
   if (filtered.length === 0) {
-    feedEl.innerHTML = onThisDayHtml + `<div class="feed-empty">Nothing here yet.${state.isEditMode ? ' Tap + to add the first moment.' : ''}</div>`;
+    feedEl.innerHTML = onThisDayHtml + `
+      <div class="feed-empty">
+        <div class="feed-empty-emoji">🌱</div>
+        <div class="feed-empty-title">Nothing here yet</div>
+        <div class="feed-empty-sub">${state.isEditMode
+          ? "Tap + to add the first moment — a photo, a note, or a letter to the future."
+          : "The first memories will show up here soon."}</div>
+      </div>`;
     bindCardEvents(feedEl);
     return;
   }
@@ -622,8 +679,8 @@ function renderBirthdayScrubberCard(kidId) {
             <div class="birthday-tap-zone right" id="birthdayTapNext-${kidId}"></div>
             ${state.isEditMode ? `
               <div class="card-edit-controls birthday-edit-controls">
-                <button class="icon-btn" id="birthdayEditBtn-${kidId}" data-edit="">✎</button>
-                <button class="icon-btn danger" id="birthdayDeleteBtn-${kidId}" data-delete="">🗑</button>
+                <button class="icon-btn" id="birthdayEditBtn-${kidId}" data-edit="" aria-label="Edit birthday">${icon("pencil")}</button>
+                <button class="icon-btn danger" id="birthdayDeleteBtn-${kidId}" data-delete="" aria-label="Delete birthday">${icon("trash")}</button>
               </div>` : ""}
           </div>
           <div class="birthday-caption" id="birthdayCaption-${kidId}"></div>
@@ -671,7 +728,7 @@ function renderOnThisDayWidgetHtml(entry, poolSize) {
     <div class="on-this-day-wrap" id="onThisDayWrap">
       <div class="on-this-day-header">
         <span class="on-this-day-ribbon">🕰️ On This Day — ${yearsAgo} year${yearsAgo === 1 ? "" : "s"} ago</span>
-        ${poolSize > 1 ? `<button class="on-this-day-shuffle" id="onThisDayShuffleBtn" title="Show another">🔀 Another</button>` : ""}
+        ${poolSize > 1 ? `<button class="on-this-day-shuffle" id="onThisDayShuffleBtn" title="Show another">${icon("shuffle")}<span>Another</span></button>` : ""}
       </div>
       ${renderCard(entry)}
     </div>`;
@@ -682,8 +739,8 @@ export function renderCard(e) {
   const kidsTxt = kidsLabel(e.kids);
   const editControls = state.isEditMode ? `
     <div class="card-edit-controls">
-      <button class="icon-btn" data-edit="${e.id}">✎</button>
-      <button class="icon-btn danger" data-delete="${e.id}">🗑</button>
+      <button class="icon-btn" data-edit="${e.id}" aria-label="Edit entry">${icon("pencil")}</button>
+      <button class="icon-btn danger" data-delete="${e.id}" aria-label="Delete entry">${icon("trash")}</button>
     </div>` : "";
 
   let photosHtml = "";
@@ -864,6 +921,15 @@ export function bindCardEvents(root) {
       const entry = state.entries.find(e => e.id === entryId);
       openLightbox(entry.photos, idx, entry.caption || "");
     });
+  });
+  // Single-photo heroes: portrait photos get a taller 4:5 frame so
+  // faces aren't beheaded by the default 4:3 landscape crop.
+  root.querySelectorAll(".photo-hero img").forEach(img => {
+    const fitFrame = () => {
+      if (img.naturalHeight > img.naturalWidth) img.closest(".photo-hero").classList.add("portrait");
+    };
+    if (img.complete && img.naturalWidth) fitFrame();
+    else img.addEventListener("load", fitFrame, { once: true });
   });
   root.querySelectorAll("[data-bump-entry]").forEach(thumb => {
     thumb.addEventListener("click", () => {
@@ -1232,7 +1298,7 @@ function updateLightbox() {
   const hasTags = (photo.people && photo.people.length > 0) || photo.location;
   const tagsBtn = document.getElementById("lightboxTagsBtn");
   tagsBtn.style.display = hasTags ? "flex" : "none";
-  tagsBtn.textContent = lightboxTagsVisible ? "🏷️ Hide tags" : "🏷️ Show tags";
+  tagsBtn.innerHTML = `${icon("tag")}<span>${lightboxTagsVisible ? "Hide" : "Show"} tags</span>`;
   const cap = photo.caption || lightboxCaption || "";
   document.getElementById("lightboxCaption").textContent = cap;
   const showNav = lightboxPhotos.length > 1;
@@ -1257,7 +1323,7 @@ function lightboxGoNext() {
 
 async function downloadCurrentPhoto() {
   const btn = document.getElementById("lightboxDownload");
-  const originalText = btn.textContent;
+  const originalHtml = btn.innerHTML;
   const url = lightboxPhotos[lightboxIdx].url;
   btn.textContent = "Saving...";
   btn.disabled = true;
@@ -1279,7 +1345,7 @@ async function downloadCurrentPhoto() {
     window.open(url, "_blank");
     showToast("Opened photo — press & hold to save it");
   } finally {
-    btn.textContent = originalText;
+    btn.innerHTML = originalHtml;
     btn.disabled = false;
   }
 }
@@ -1296,7 +1362,11 @@ function openPinScreen() {
   document.getElementById("pinError").textContent = "";
   const keypad = document.getElementById("pinKeypad");
   const keys = ["1","2","3","4","5","6","7","8","9","","0","⌫"];
-  keypad.innerHTML = keys.map(k => k ? `<button class="pin-key" data-key="${k}">${k}</button>` : `<div></div>`).join("");
+  keypad.innerHTML = keys.map(k => {
+    if (!k) return `<div></div>`;
+    const label = k === "⌫" ? icon("backspace") : k;
+    return `<button class="pin-key" data-key="${k}" aria-label="${k === "⌫" ? "Backspace" : k}">${label}</button>`;
+  }).join("");
   keypad.querySelectorAll(".pin-key").forEach(btn => {
     btn.addEventListener("click", () => handlePinKey(btn.dataset.key));
   });
@@ -1421,7 +1491,7 @@ function renderTypePicker() {
         </div>`;
       }).join("")}
     </div>
-    <button class="collapse-toggle" id="manageTypesLink" style="margin-top:6px;">⚙ Manage entry types</button>
+    <button class="collapse-toggle" id="manageTypesLink" style="margin-top:6px;">${icon("settings")}<span>Manage entry types</span></button>
   `;
   content.querySelectorAll(".type-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -1620,7 +1690,7 @@ function renderEntryForm(existing) {
               <div class="thennow-form-empty" id="thenPhotoEmpty" style="${thenNowExisting.then ? 'display:none;' : ''}">Tap 📷 to add a photo</div>
               <div class="thennow-form-hint" id="thenPhotoHint" style="${thenNowExisting.then ? '' : 'display:none;'}">↔ Drag to reposition</div>
               <label class="thennow-form-change-btn" title="Change photo">
-                📷
+                ${icon("camera")}
                 <input type="file" accept="image/*" id="fThenPhoto" style="display:none;">
               </label>
             </div>
@@ -1633,7 +1703,7 @@ function renderEntryForm(existing) {
               <div class="thennow-form-empty" id="nowPhotoEmpty" style="${thenNowExisting.now ? 'display:none;' : ''}">Tap 📷 to add a photo</div>
               <div class="thennow-form-hint" id="nowPhotoHint" style="${thenNowExisting.now ? '' : 'display:none;'}">↔ Drag to reposition</div>
               <label class="thennow-form-change-btn" title="Change photo">
-                📷
+                ${icon("camera")}
                 <input type="file" accept="image/*" id="fNowPhoto" style="display:none;">
               </label>
             </div>
@@ -1654,7 +1724,7 @@ function renderEntryForm(existing) {
               <div class="bump-week-photo-slot firstyear-form-slot" id="firstYearSlot${m.idx}">
                 <img class="bumpRowPreviewImg" id="firstYearPreview${m.idx}" src="${existingPhoto ? existingPhoto.url : ''}" style="${existingPhoto ? '' : 'display:none;'}">
                 <label class="bump-week-photo-btn">
-                  📷
+                  ${icon("camera")}
                   <input type="file" accept="image/*" id="firstYearFile${m.idx}" style="display:none;">
                 </label>
               </div>
@@ -1926,7 +1996,7 @@ function addBumpWeekRow(week, date, existingPhoto) {
     <div class="bump-week-photo-slot">
       <img class="bumpRowPreviewImg" src="${existingPhoto ? existingPhoto.url : ''}" style="${existingPhoto ? '' : 'display:none;'}">
       <label class="bump-week-photo-btn">
-        📷
+        ${icon("camera")}
         <input type="file" accept="image/*" class="bumpRowFileInput" style="display:none;">
       </label>
     </div>
@@ -2179,7 +2249,7 @@ function renderPhotoPreview() {
       <div class="photo-thumb">
         <img src="${p.url}">
         <button type="button" class="photo-thumb-remove" data-remove-existing="${i}" title="Remove photo">×</button>
-        <button type="button" class="photo-thumb-tag-btn" data-tag-existing="${i}" title="Tag people">🏷️</button>
+        <button type="button" class="photo-thumb-tag-btn" data-tag-existing="${i}" title="Tag people">${icon("tag")}</button>
       </div>`;
   });
   pendingPhotos.forEach((file, i) => {
@@ -2188,7 +2258,7 @@ function renderPhotoPreview() {
       <div class="photo-thumb">
         <img id="pendingPreviewImg${i}" src="" alt="">
         <button type="button" class="photo-thumb-remove" data-remove-pending="${i}" title="Remove photo">×</button>
-        <button type="button" class="photo-thumb-tag-btn" data-tag-pending="${i}" title="Tag people">🏷️</button>
+        <button type="button" class="photo-thumb-tag-btn" data-tag-pending="${i}" title="Tag people">${icon("tag")}</button>
       </div>`;
   });
   // Set preview sources after the elements exist — HEIC files (common when a
@@ -2634,7 +2704,7 @@ function renderManageCategories() {
   const order = getCategoryOrder().filter(id => CATEGORIES[id]);
 
   content.innerHTML = `
-    <div class="sheet-title">⚙ Manage entry types</div>
+    <div class="sheet-title" style="display:flex; align-items:center; gap:8px;">${icon("settings")}<span>Manage entry types</span></div>
     <div class="type-hint">Use ↑ ↓ to reorder · tap Visible/Hidden to toggle</div>
     <div id="catList" style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
       ${order.map((id, i) => renderCatRow(id, i, order.length)).join("")}
