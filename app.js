@@ -234,6 +234,7 @@ function enterEditMode() {
   document.getElementById("modeBadge").classList.add("edit");
   document.getElementById("fabAddMini").style.display = "flex";
   document.getElementById("manageKidsBtn").style.display = "flex";
+  document.getElementById("backupBtn").style.display = "flex";
   signInAnonymously(auth)
     .then(() => {
       // Only now is request.auth actually populated server-side, so only
@@ -242,6 +243,7 @@ function enterEditMode() {
       migrateLegacyPrivacyField();
     })
     .catch(err => console.error("Auth error:", err));
+  checkBackupReminder();
   renderFeed();
 }
 
@@ -3385,6 +3387,188 @@ async function deleteKidCascade(kidId) {
   }
 }
 
+// ============================================================
+// BACKUP & EXPORT — a self-contained download the person can keep
+// somewhere outside Firebase entirely (Google Drive, an external drive,
+// wherever), so the family's memories don't live in exactly one place.
+// Runs fully client-side: bundles the already-loaded data plus every
+// photo into a single .zip via JSZip, no server component involved.
+// ============================================================
+
+let backupReminderShownThisSession = false;
+
+// Plain local YYYY-MM-DD — toISOString().slice(0,10) would use UTC, which
+// can show the wrong day depending on time of day and timezone.
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function getBackupMeta() {
+  try {
+    const snap = await getDoc(doc(db, "settings", "backupMeta"));
+    return snap.exists() ? snap.data() : null;
+  } catch (err) {
+    console.warn("Backup meta read skipped:", err);
+    return null;
+  }
+}
+
+async function checkBackupReminder() {
+  if (backupReminderShownThisSession) return;
+  backupReminderShownThisSession = true;
+  const meta = await getBackupMeta();
+  const lastBackupAt = meta && meta.lastBackupAt ? meta.lastBackupAt.toDate() : null;
+  const daysSince = lastBackupAt ? (Date.now() - lastBackupAt.getTime()) / 86400000 : Infinity;
+  if (daysSince > 30) {
+    showToast(lastBackupAt
+      ? "It's been over a month since your last backup — tap the backup icon up top"
+      : "You haven't backed up yet — tap the backup icon up top to get started");
+  }
+}
+
+// Every {url, path} pair an entry owns, across all its possible shapes —
+// same coverage as collectEntryPhotoPaths, but keeping the url too since
+// that's what's actually fetchable.
+function collectEntryPhotoRefs(entry) {
+  const refs = [];
+  (entry.photos || []).forEach(p => { if (p && p.path && p.url) refs.push({ path: p.path, url: p.url }); });
+  (entry.weeks || []).forEach(w => { if (w.photo && w.photo.path && w.photo.url) refs.push({ path: w.photo.path, url: w.photo.url }); });
+  (entry.months || []).forEach(m => { if (m.photo && m.photo.path && m.photo.url) refs.push({ path: m.photo.path, url: m.photo.url }); });
+  if (entry.thenPhoto && entry.thenPhoto.path && entry.thenPhoto.url) refs.push({ path: entry.thenPhoto.path, url: entry.thenPhoto.url });
+  if (entry.nowPhoto && entry.nowPhoto.path && entry.nowPhoto.url) refs.push({ path: entry.nowPhoto.path, url: entry.nowPhoto.url });
+  return refs;
+}
+
+function collectAllPhotoRefs() {
+  const seen = new Map(); // dedupe by path — a couple of shapes could theoretically repeat one
+  state.entries.forEach(e => {
+    collectEntryPhotoRefs(e).forEach(r => { if (!seen.has(r.path)) seen.set(r.path, r); });
+  });
+  return Array.from(seen.values());
+}
+
+// Firestore Timestamps don't survive JSON.stringify in a useful form on
+// their own — this turns any of them, anywhere in the object tree, into a
+// plain ISO date string so the exported data.json is actually readable.
+function timestampReplacer(key, value) {
+  if (value && typeof value.toDate === "function") {
+    try { return value.toDate().toISOString(); } catch { return value; }
+  }
+  return value;
+}
+
+async function openBackupSheet() {
+  await renderBackupSheet();
+  document.getElementById("addSheetOverlay").classList.add("open");
+  lockBodyScroll();
+}
+
+async function renderBackupSheet() {
+  const content = document.getElementById("addSheetContent");
+  const meta = await getBackupMeta();
+  const lastBackupAt = meta && meta.lastBackupAt ? meta.lastBackupAt.toDate() : null;
+  const photoCount = collectAllPhotoRefs().length;
+
+  content.innerHTML = `
+    <div class="sheet-title">🗄️ Backup &amp; export</div>
+    <p style="font-size:13px; color:var(--ink-soft); margin-bottom:4px;">
+      <strong>Last backup:</strong> ${lastBackupAt ? formatDate(localDateStr(lastBackupAt)) + ` at ${lastBackupAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Never"}
+    </p>
+    <p style="font-size:13px; color:var(--ink-soft); margin-bottom:18px;">
+      ${state.entries.length} ${state.entries.length === 1 ? "entry" : "entries"} · ${photoCount} ${photoCount === 1 ? "photo" : "photos"}
+    </p>
+    <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">
+      This downloads everything — every entry, kid profile, tag, trip, and photo — into a single .zip
+      file, entirely separate from Firebase. Save it to Google Drive, an external drive, wherever feels
+      safe. Nothing in the app changes; this only reads and packages what's already there.
+    </p>
+    <button class="btn-primary" id="fullBackupBtn">Download full backup (with photos)</button>
+    <button class="btn-secondary" id="dataOnlyBackupBtn">Download data only (fast, no photos)</button>
+    <div id="backupProgress" style="font-size:12.5px; color:var(--ink-soft); text-align:center; margin-top:10px; min-height:16px;"></div>
+    <button class="btn-secondary" id="closeBackupBtn" style="margin-top:14px;">Close</button>
+  `;
+
+  document.getElementById("fullBackupBtn").addEventListener("click", () => runBackup(true));
+  document.getElementById("dataOnlyBackupBtn").addEventListener("click", () => runBackup(false));
+  document.getElementById("closeBackupBtn").addEventListener("click", closeAddSheet);
+}
+
+async function runBackup(includePhotos) {
+  const fullBtn = document.getElementById("fullBackupBtn");
+  const dataBtn = document.getElementById("dataOnlyBackupBtn");
+  const progressEl = document.getElementById("backupProgress");
+  fullBtn.disabled = true;
+  dataBtn.disabled = true;
+  progressEl.textContent = "Preparing...";
+
+  try {
+    if (typeof JSZip === "undefined") {
+      throw new Error("JSZip didn't load — check your connection and try again");
+    }
+
+    const manifest = {
+      exportedAt: new Date().toISOString(),
+      source: "The Jarrett Book",
+      kids: KIDS,
+      tags: TAGS,
+      trips: state.TRIPS,
+      hiddenCategoryIds,
+      entries: state.entries
+    };
+    const dataJson = JSON.stringify(manifest, timestampReplacer, 2);
+
+    const zip = new JSZip();
+    zip.file("data.json", dataJson);
+
+    if (includePhotos) {
+      const refs = collectAllPhotoRefs();
+      for (let i = 0; i < refs.length; i++) {
+        progressEl.textContent = `Downloading photo ${i + 1} of ${refs.length}...`;
+        try {
+          const resp = await fetch(refs[i].url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          zip.file(`photos/${refs[i].path}`, blob);
+        } catch (err) {
+          // A single missing/broken photo shouldn't sink the whole backup —
+          // log it and keep going with everything else.
+          console.warn("Skipped photo in backup:", refs[i].path, err);
+        }
+      }
+    }
+
+    progressEl.textContent = "Zipping everything up...";
+    const zipBlob = await zip.generateAsync({ type: "blob" }, (metadata) => {
+      progressEl.textContent = `Zipping... ${Math.round(metadata.percent)}%`;
+    });
+
+    const dateStr = localDateStr(new Date());
+    const filename = `masons-book-backup-${dateStr}${includePhotos ? "" : "-data-only"}.zip`;
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    await setDoc(doc(db, "settings", "backupMeta"), {
+      lastBackupAt: serverTimestamp(),
+      lastBackupType: includePhotos ? "full" : "data-only"
+    }, { merge: true });
+
+    showToast("Backup downloaded — save it somewhere safe!");
+    await renderBackupSheet();
+  } catch (err) {
+    console.error("Backup error:", err);
+    showToast("Backup failed — try again");
+    fullBtn.disabled = false;
+    dataBtn.disabled = false;
+    progressEl.textContent = "";
+  }
+}
+
 function closeFabCluster() {
   document.getElementById("fabCluster").classList.remove("open");
 }
@@ -3415,6 +3599,7 @@ function bindGlobalEvents() {
     }
   });
   document.getElementById("manageKidsBtn").addEventListener("click", openManageKidsSheet);
+  document.getElementById("backupBtn").addEventListener("click", openBackupSheet);
   document.getElementById("addSheetOverlay").addEventListener("click", (e) => {
     if (e.target.id === "addSheetOverlay") closeAddSheet();
   });
