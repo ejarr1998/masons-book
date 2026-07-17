@@ -1234,10 +1234,14 @@ function initFirstYearScrubbers(root) {
   });
 }
 
-// Bump Progression timelapse: same crossfade-scrubber mechanics as the First
-// Year card, plus an autoplay loop so the belly "grows" on its own while the
-// card is on screen. Any manual interaction (scrub or tap) pauses the
-// autoplay for a few seconds so the two never fight over the stage.
+// Bump Progression timelapse: a constant slow dissolve — the incoming photo
+// always stacks on top and fades in over ~3s while the outgoing one stays
+// put beneath, so the stage is always mid-morph and never dips to the dark
+// card behind it (the classic two-image crossfade trap). A gentle settle-zoom
+// on each incoming frame adds a bit of life. Manual scrubbing/tapping uses a
+// fast fade instead — a 3s dissolve is lovely on autoplay but miserable when
+// you're dragging through weeks by hand. Autoplay pauses briefly on any
+// manual interaction so the two never fight over the stage.
 function initBumpMorphs(root) {
   root.querySelectorAll(".bump-morph").forEach(morph => {
     const entryId = morph.dataset.bumpmorphEntry;
@@ -1250,28 +1254,38 @@ function initBumpMorphs(root) {
     const captionEl = document.getElementById(`bumpMorphCaption-${entryId}`);
     const track = document.getElementById(`bumpMorphTrack-${entryId}`);
 
-    // Preload every frame so the crossfade never flashes a half-loaded image.
+    // Preload every frame so the dissolve never flashes a half-loaded image.
     weeks.forEach(w => { const pre = new Image(); pre.src = w.photo.url; });
 
+    const FADE_SLOW_MS = 3000;
+    const FADE_FAST_MS = 300;
     let activeLayer = "a";
+    let zTop = 1;
     let pos = 0;
 
-    function showWeek(newPos) {
+    function showWeek(newPos, fast) {
       pos = newPos;
       const showEl = activeLayer === "a" ? imgB : imgA;
-      const hideEl = activeLayer === "a" ? imgA : imgB;
-      showEl.src = weeks[pos].photo.url;
-      showEl.classList.add("active");
-      hideEl.classList.remove("active");
       activeLayer = activeLayer === "a" ? "b" : "a";
+      showEl.style.transitionDuration = (fast ? FADE_FAST_MS : FADE_SLOW_MS) + "ms";
+      showEl.src = weeks[pos].photo.url;
+      showEl.style.zIndex = ++zTop;
+      showEl.style.opacity = 0;
+      showEl.style.transform = fast ? "scale(1)" : "scale(1.06)";
+      // Double rAF: let the browser paint the transparent/zoomed start state
+      // before transitioning to the settled one.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        showEl.style.opacity = 1;
+        showEl.style.transform = "scale(1)";
+      }));
       captionEl.textContent = `Week ${weeks[pos].week}`;
       track.querySelectorAll(".firstyear-tick").forEach(t => {
         t.classList.toggle("current", parseInt(t.dataset.tickPos, 10) === pos);
       });
     }
 
-    // ---- Autoplay: advance ~1.6s per frame, looping, only while visible ----
-    const AUTOPLAY_MS = 1600;
+    // ---- Autoplay: one frame per slow fade = constant motion, no holds ----
+    const AUTOPLAY_MS = FADE_SLOW_MS;
     let timer = null;
     let paused = false;
     let resumeTimeout = null;
@@ -1304,7 +1318,7 @@ function initBumpMorphs(root) {
       const rect = track.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       const newPos = Math.round(pct * (weeks.length - 1));
-      if (newPos !== pos) showWeek(newPos);
+      if (newPos !== pos) showWeek(newPos, true);
     }
 
     let dragging = false;
@@ -1328,18 +1342,18 @@ function initBumpMorphs(root) {
     // ---- Tap zones: step at the edges, fullscreen in the center ----
     document.getElementById(`bumpMorphTapPrev-${entryId}`).addEventListener("click", () => {
       userInteracted();
-      if (pos > 0) showWeek(pos - 1);
+      if (pos > 0) showWeek(pos - 1, true);
     });
     document.getElementById(`bumpMorphTapNext-${entryId}`).addEventListener("click", () => {
       userInteracted();
-      if (pos < weeks.length - 1) showWeek(pos + 1);
+      if (pos < weeks.length - 1) showWeek(pos + 1, true);
     });
     document.getElementById(`bumpMorphTapView-${entryId}`).addEventListener("click", () => {
       const photosWithCaptions = weeks.map(w => ({ ...w.photo, caption: `Week ${w.week}` }));
       openLightbox(photosWithCaptions, pos, "");
     });
 
-    showWeek(0);
+    showWeek(0, true);
   });
 }
 

@@ -530,6 +530,12 @@ input, textarea, select{ font-family: inherit; }
 /* Timelapse stage reuses the First Year scrubber classes; only the caption
    needs re-theming for the dark pregnancy card. */
 .bump-morph{ margin: 4px 0 10px; }
+.bump-morph .firstyear-img{
+  /* duration is set inline per frame (3s autoplay dissolve, 0.3s manual) */
+  transition-property: opacity, transform;
+  transition-timing-function: ease;
+  will-change: opacity, transform;
+}
 .bump-morph .firstyear-caption{ color: var(--parchment); }
 .bump-morph .firstyear-track::before{ background: rgba(246,241,231,0.25); }
 .bump-morph .firstyear-tick{ background: rgba(246,241,231,0.35); }
