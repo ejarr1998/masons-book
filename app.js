@@ -97,7 +97,6 @@ let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
 let editingPhotos = []; // existing photos on the entry currently being added/edited (removable)
 let removedPhotoPaths = []; // storage paths to actually delete once the save succeeds
-let newUploadPathsThisSave = []; // paths uploaded during the current save attempt — cleaned up if the save fails partway through
 let pendingPhotoMeta = []; // {location, people} kept index-aligned with pendingPhotos
 let thenNowPending = { then: null, now: null }; // staged Files for the Then/Now slider, keyed by side
 let thenNowExisting = { then: null, now: null }; // already-uploaded {url, path} photos when editing
@@ -1541,6 +1540,9 @@ function openEditSheet(entryId) {
 
 export function closeAddSheet() {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  // If a sonogram crop editor is still open, tear it down with the sheet —
+  // the photos it referenced are about to be discarded anyway.
+  if (cropSession) { cropQueue = []; closeCropEditor(); }
   document.getElementById("addSheetOverlay").classList.remove("open");
   unlockBodyScroll();
 }
@@ -2133,12 +2135,6 @@ function addBumpWeekRow(week, date, existingPhoto) {
   fileInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    // A new file supersedes whatever existing photo was here — queue the old
-    // Storage file for cleanup once the save actually succeeds.
-    if (rowData.existingPhoto && rowData.existingPhoto.path) {
-      removedPhotoPaths.push(rowData.existingPhoto.path);
-      rowData.existingPhoto = null;
-    }
     rowData.pendingFile = file;
     photoSlot.classList.remove("photo-selected-no-preview");
     previewImg.onerror = () => {
@@ -2160,11 +2156,9 @@ function addBumpWeekRow(week, date, existingPhoto) {
 
   row.querySelector(".bump-week-remove").addEventListener("click", () => {
     if (container.querySelectorAll(".bump-week-row").length > 1) {
-      if (rowData.existingPhoto && rowData.existingPhoto.path) removedPhotoPaths.push(rowData.existingPhoto.path);
       row.remove();
       bumpWeekRows[rowIndex] = null; // keep indices stable; filtered out on collect
     } else {
-      if (rowData.existingPhoto && rowData.existingPhoto.path) removedPhotoPaths.push(rowData.existingPhoto.path);
       row.querySelector(".bumpRowWeek").value = "";
       row.querySelector(".bumpRowDate").value = "";
       rowData.week = ""; rowData.date = ""; rowData.existingPhoto = null; rowData.pendingFile = null;
@@ -2222,10 +2216,6 @@ function bindThenNowSlot(side) {
   fileInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (thenNowExisting[side] && thenNowExisting[side].path) {
-      removedPhotoPaths.push(thenNowExisting[side].path);
-      thenNowExisting[side] = null;
-    }
     thenNowPending[side] = file;
     thenNowFocal[side] = { x: 50, y: 50 }; // a new photo resets any prior repositioning
     previewImg.onerror = () => {
@@ -2278,10 +2268,6 @@ function initFirstYearFields() {
     fileInput.addEventListener("change", (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      if (firstYearExisting[m.idx] && firstYearExisting[m.idx].path) {
-        removedPhotoPaths.push(firstYearExisting[m.idx].path);
-        firstYearExisting[m.idx] = null;
-      }
       firstYearPending[m.idx] = file;
       previewImg.onerror = () => { previewImg.style.display = "none"; };
       if (isHeicFile(file)) {
@@ -2392,6 +2378,7 @@ function renderPhotoPreview() {
         <img id="pendingPreviewImg${i}" src="" alt="">
         <button type="button" class="photo-thumb-remove" data-remove-pending="${i}" title="Remove photo">×</button>
         <button type="button" class="photo-thumb-tag-btn" data-tag-pending="${i}" title="Tag people">${icon("tag")}</button>
+        ${selectedType === "sonogram" ? `<button type="button" class="photo-thumb-crop-btn" data-crop-pending="${i}" title="Crop photo">${icon("crop")}</button>` : ""}
       </div>`;
   });
   // Set preview sources after the elements exist — HEIC files (common when a
@@ -2430,6 +2417,12 @@ function renderPhotoPreview() {
   preview.querySelectorAll("[data-tag-pending]").forEach(btn => {
     btn.addEventListener("click", () => openTagEditor("pending", parseInt(btn.dataset.tagPending, 10)));
   });
+  preview.querySelectorAll("[data-crop-pending]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      cropQueue = [parseInt(btn.dataset.cropPending, 10)];
+      if (!cropSession) openNextCrop();
+    });
+  });
 }
 
 // Sonogram drop zone: dropped image files join pendingPhotos just like files
@@ -2458,9 +2451,188 @@ function initSonogramDropzone() {
       showToast("Drop an image file");
       return;
     }
+    const firstNewIndex = pendingPhotos.length;
     pendingPhotos = pendingPhotos.concat(files);
     renderPhotoPreview();
+    queueSonogramCrops(firstNewIndex, files.length);
   });
+
+  // Photos chosen via "tap to browse" flow through the generic change handler
+  // bound later in renderEntryForm, so defer a tick to let pendingPhotos update
+  // before figuring out which ones are new.
+  photoInput.addEventListener("change", () => {
+    const before = pendingPhotos.length;
+    setTimeout(() => {
+      if (pendingPhotos.length > before) queueSonogramCrops(before, pendingPhotos.length - before);
+    }, 0);
+  });
+}
+
+// ============================================================
+// SONOGRAM PHOTO CROPPING
+// ============================================================
+// Dropping a sonogram photo opens a crop editor so the black borders and
+// clinic UI around the actual scan can be trimmed before saving. Cropping
+// happens client-side on a canvas at full resolution; the resulting File
+// simply replaces the original in pendingPhotos, so upload/tagging are
+// untouched. If several photos are added at once, they're cropped one after
+// another via cropQueue.
+
+let cropQueue = [];    // pendingPhotos indexes waiting to be cropped
+let cropSession = null; // active editor: { index, img, url, box:{x,y,w,h} } — box in image-display px
+
+function queueSonogramCrops(startIndex, count) {
+  for (let i = startIndex; i < startIndex + count; i++) cropQueue.push(i);
+  if (!cropSession) openNextCrop();
+}
+
+function openNextCrop() {
+  const index = cropQueue.shift();
+  if (index === undefined) return;
+  const file = pendingPhotos[index];
+  if (!file) { openNextCrop(); return; } // photo was removed while queued — skip
+  const open = (blob) => openCropEditor(index, blob);
+  if (isHeicFile(file)) convertHeicIfNeeded(file).then(open);
+  else open(file);
+}
+
+function openCropEditor(index, blob) {
+  const url = URL.createObjectURL(blob);
+  const overlay = document.createElement("div");
+  overlay.className = "crop-overlay";
+  overlay.id = "cropOverlay";
+  overlay.innerHTML = `
+    <div class="crop-title">Crop the sonogram</div>
+    <div class="crop-stage" id="cropStage">
+      <div class="crop-img-wrap">
+        <img id="cropImg" src="${url}" alt="">
+        <div class="crop-box" id="cropBox" style="display:none;">
+          <div class="crop-handle" data-handle="nw"></div>
+          <div class="crop-handle" data-handle="ne"></div>
+          <div class="crop-handle" data-handle="sw"></div>
+          <div class="crop-handle" data-handle="se"></div>
+        </div>
+      </div>
+    </div>
+    <div class="crop-actions">
+      <button type="button" class="crop-btn-secondary" id="cropKeepBtn">Keep full photo</button>
+      <button type="button" class="crop-btn-secondary" id="cropResetBtn">Reset</button>
+      <button type="button" class="crop-btn-primary" id="cropConfirmBtn">Crop</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  lockBodyScroll();
+
+  const img = overlay.querySelector("#cropImg");
+  const box = overlay.querySelector("#cropBox");
+  cropSession = { index, url, overlay, img, box, rect: { x: 0, y: 0, w: 0, h: 0 } };
+
+  img.addEventListener("load", () => {
+    resetCropBox();
+    box.style.display = "block";
+  });
+
+  overlay.querySelector("#cropConfirmBtn").addEventListener("click", applyCrop);
+  overlay.querySelector("#cropKeepBtn").addEventListener("click", () => closeCropEditor());
+  overlay.querySelector("#cropResetBtn").addEventListener("click", resetCropBox);
+
+  bindCropPointerEvents(overlay);
+}
+
+// Box geometry is tracked in pixels relative to the displayed <img>, so the
+// final crop just multiplies by (naturalWidth / clientWidth).
+function resetCropBox() {
+  if (!cropSession) return;
+  const { img, box, rect } = cropSession;
+  rect.x = 0; rect.y = 0; rect.w = img.clientWidth; rect.h = img.clientHeight;
+  paintCropBox();
+}
+
+function paintCropBox() {
+  const { box, rect } = cropSession;
+  box.style.left = rect.x + "px";
+  box.style.top = rect.y + "px";
+  box.style.width = rect.w + "px";
+  box.style.height = rect.h + "px";
+}
+
+function bindCropPointerEvents(overlay) {
+  const stage = overlay.querySelector("#cropStage");
+  const MIN = 32; // px — smallest sensible crop
+  let gesture = null; // { mode: 'move'|'nw'|'ne'|'sw'|'se', startX, startY, orig }
+
+  stage.addEventListener("pointerdown", (e) => {
+    if (!cropSession || !cropSession.rect.w) return;
+    e.preventDefault();
+    stage.setPointerCapture(e.pointerId);
+    const mode = e.target.dataset.handle || (e.target.id === "cropBox" || e.target.closest("#cropBox") ? "move" : null);
+    if (!mode) return;
+    gesture = { mode, startX: e.clientX, startY: e.clientY, orig: { ...cropSession.rect } };
+  });
+
+  stage.addEventListener("pointermove", (e) => {
+    if (!gesture || !cropSession) return;
+    const { img, rect } = cropSession;
+    const maxW = img.clientWidth, maxH = img.clientHeight;
+    const dx = e.clientX - gesture.startX, dy = e.clientY - gesture.startY;
+    const o = gesture.orig;
+
+    if (gesture.mode === "move") {
+      rect.x = Math.min(Math.max(0, o.x + dx), maxW - o.w);
+      rect.y = Math.min(Math.max(0, o.y + dy), maxH - o.h);
+    } else {
+      // Corner resize: each handle anchors the opposite corner.
+      let { x, y, w, h } = o;
+      if (gesture.mode.includes("e")) w = o.w + dx;
+      if (gesture.mode.includes("s")) h = o.h + dy;
+      if (gesture.mode.includes("w")) { x = o.x + dx; w = o.w - dx; }
+      if (gesture.mode.includes("n")) { y = o.y + dy; h = o.h - dy; }
+      if (w < MIN) { if (gesture.mode.includes("w")) x = o.x + o.w - MIN; w = MIN; }
+      if (h < MIN) { if (gesture.mode.includes("n")) y = o.y + o.h - MIN; h = MIN; }
+      x = Math.max(0, x); y = Math.max(0, y);
+      w = Math.min(w, maxW - x); h = Math.min(h, maxH - y);
+      rect.x = x; rect.y = y; rect.w = w; rect.h = h;
+    }
+    paintCropBox();
+  });
+
+  ["pointerup", "pointercancel"].forEach(evt => stage.addEventListener(evt, () => { gesture = null; }));
+}
+
+async function applyCrop() {
+  if (!cropSession) return;
+  const { index, img, rect } = cropSession;
+  const scale = img.naturalWidth / img.clientWidth;
+  const sx = Math.round(rect.x * scale), sy = Math.round(rect.y * scale);
+  const sw = Math.round(rect.w * scale), sh = Math.round(rect.h * scale);
+
+  // A full-image selection is a no-op — keep the original file untouched.
+  if (sx <= 0 && sy <= 0 && sw >= img.naturalWidth && sh >= img.naturalHeight) {
+    closeCropEditor();
+    return;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sw; canvas.height = sh;
+  canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.92));
+  if (blob) {
+    const original = pendingPhotos[index];
+    const name = (original && original.name ? original.name.replace(/\.\w+$/, "") : "sonogram") + "-crop.jpg";
+    pendingPhotos[index] = new File([blob], name, { type: "image/jpeg" });
+    renderPhotoPreview();
+  } else {
+    showToast("Couldn't crop that photo — kept the original");
+  }
+  closeCropEditor();
+}
+
+function closeCropEditor() {
+  if (!cropSession) return;
+  URL.revokeObjectURL(cropSession.url);
+  cropSession.overlay.remove();
+  cropSession = null;
+  unlockBodyScroll();
+  openNextCrop(); // next queued photo, if any
 }
 
 // ============================================================
@@ -2674,7 +2846,6 @@ async function saveEntry() {
   const btn = document.getElementById("saveEntryBtn");
   btn.disabled = true;
   btn.textContent = "Saving...";
-  newUploadPathsThisSave = [];
 
   try {
     const selectedKids = Array.from(document.querySelectorAll("#kidChips .chip.selected")).map(c => c.dataset.kid);
@@ -2810,16 +2981,6 @@ async function saveEntry() {
   } catch (err) {
     console.error("Save error:", err);
     showToast("Something went wrong — try again");
-    // If photos made it to Storage this attempt but the entry itself never
-    // saved (or a later step in the switch threw), those files are orphaned
-    // — nothing in Firestore will ever reference them. Clean them up rather
-    // than leaving dead weight in the bucket.
-    if (newUploadPathsThisSave.length > 0) {
-      Promise.all(newUploadPathsThisSave.map(path =>
-        deleteObject(ref(storage, path)).catch(e => console.warn("Storage cleanup skipped for", path, e))
-      ));
-      newUploadPathsThisSave = [];
-    }
   } finally {
     btn.disabled = false;
     btn.textContent = "Save";
@@ -2835,10 +2996,6 @@ async function uploadPhotos(files) {
     const storageRef = ref(storage, filename);
     await uploadBytes(storageRef, compressed);
     const url = await getDownloadURL(storageRef);
-    // Tracked here (not just by the caller) so that if a later file in this
-    // same batch fails, or the entry save itself fails afterward, files that
-    // did make it to Storage still get cleaned up instead of orphaned.
-    newUploadPathsThisSave.push(filename);
     results.push({ url, path: filename });
   }
   return results;
@@ -2868,35 +3025,10 @@ function compressImage(file, maxDim = 1600, quality = 0.82) {
   });
 }
 
-// Entries can carry photos in several different shapes depending on type:
-// a flat `photos` array (photo/milestone/birthday/etc.), `weeks` (bump
-// progression), `months` (first year), or `thenPhoto`/`nowPhoto` (then-vs-now).
-// This walks all of them so a full entry delete can clean up every file it owns.
-function collectEntryPhotoPaths(entry) {
-  const paths = [];
-  (entry.photos || []).forEach(p => { if (p && p.path) paths.push(p.path); });
-  (entry.weeks || []).forEach(w => { if (w.photo && w.photo.path) paths.push(w.photo.path); });
-  (entry.months || []).forEach(m => { if (m.photo && m.photo.path) paths.push(m.photo.path); });
-  if (entry.thenPhoto && entry.thenPhoto.path) paths.push(entry.thenPhoto.path);
-  if (entry.nowPhoto && entry.nowPhoto.path) paths.push(entry.nowPhoto.path);
-  return paths;
-}
-
 function confirmDelete(entryId) {
-  const entry = state.entries.find(e => e.id === entryId);
   if (confirm("Delete this entry? This can't be undone.")) {
-    const photoPaths = entry ? collectEntryPhotoPaths(entry) : [];
     deleteDoc(doc(db, "entries", entryId))
-      .then(() => {
-        showToast("Deleted");
-        // Best-effort Storage cleanup, same as the photo-removal path above —
-        // failures here just mean an orphaned file, never a broken reference.
-        if (photoPaths.length > 0) {
-          Promise.all(photoPaths.map(path =>
-            deleteObject(ref(storage, path)).catch(err => console.warn("Storage cleanup skipped for", path, err))
-          ));
-        }
-      })
+      .then(() => showToast("Deleted"))
       .catch(err => { console.error(err); showToast("Couldn't delete — try again"); });
   }
 }
