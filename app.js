@@ -2836,10 +2836,35 @@ function compressImage(file, maxDim = 1600, quality = 0.82) {
   });
 }
 
+// Entries can carry photos in several different shapes depending on type:
+// a flat `photos` array (photo/milestone/birthday/etc.), `weeks` (bump
+// progression), `months` (first year), or `thenPhoto`/`nowPhoto` (then-vs-now).
+// This walks all of them so a full entry delete can clean up every file it owns.
+function collectEntryPhotoPaths(entry) {
+  const paths = [];
+  (entry.photos || []).forEach(p => { if (p && p.path) paths.push(p.path); });
+  (entry.weeks || []).forEach(w => { if (w.photo && w.photo.path) paths.push(w.photo.path); });
+  (entry.months || []).forEach(m => { if (m.photo && m.photo.path) paths.push(m.photo.path); });
+  if (entry.thenPhoto && entry.thenPhoto.path) paths.push(entry.thenPhoto.path);
+  if (entry.nowPhoto && entry.nowPhoto.path) paths.push(entry.nowPhoto.path);
+  return paths;
+}
+
 function confirmDelete(entryId) {
+  const entry = state.entries.find(e => e.id === entryId);
   if (confirm("Delete this entry? This can't be undone.")) {
+    const photoPaths = entry ? collectEntryPhotoPaths(entry) : [];
     deleteDoc(doc(db, "entries", entryId))
-      .then(() => showToast("Deleted"))
+      .then(() => {
+        showToast("Deleted");
+        // Best-effort Storage cleanup, same as the photo-removal path above —
+        // failures here just mean an orphaned file, never a broken reference.
+        if (photoPaths.length > 0) {
+          Promise.all(photoPaths.map(path =>
+            deleteObject(ref(storage, path)).catch(err => console.warn("Storage cleanup skipped for", path, err))
+          ));
+        }
+      })
       .catch(err => { console.error(err); showToast("Couldn't delete — try again"); });
   }
 }
