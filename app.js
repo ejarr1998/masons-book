@@ -104,6 +104,7 @@ let thenNowExisting = { then: null, now: null }; // already-uploaded {url, path}
 let thenNowFocal = { then: { x: 50, y: 50 }, now: { x: 50, y: 50 } }; // object-position focal point per side, as percentages
 let firstYearPending = {}; // { [monthIdx]: File } staged photos not yet uploaded
 let firstYearExisting = {}; // { [monthIdx]: {url, path} } already-uploaded photos when editing
+let milestoneSubtype = null; // null = general milestone, "firstword" = dedicated First Word layout
 let bumpWeekRows = []; // [{week, date, existingPhoto, pendingFile}] for the Bump Progression pregnancy sub-type
 let taggingPhotoRef = null; // { source: 'existing'|'pending', index } — which photo the tag editor is open on
 let hiddenCategoryIds = [];  // categories toggled off from the add-moment grid, shared via Firestore
@@ -849,9 +850,16 @@ export function renderCard(e) {
               </div>`;
       break;
     case "milestone":
-      body = `<div class="card-title">${escapeHtml(e.title || "")}</div>
-              ${e.note ? `<p class="card-text">${escapeHtml(e.note)}</p>` : ""}
-              ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
+      if (e.subtype === "firstword") {
+        body = `<span class="firstword-label">🗣️ First word</span>
+                <div class="firstword-word">&ldquo;${escapeHtml(e.title || "")}&rdquo;</div>
+                ${e.note ? `<p class="card-text firstword-story">${escapeHtml(e.note)}</p>` : ""}
+                ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
+      } else {
+        body = `<div class="card-title">${escapeHtml(e.title || "")}</div>
+                ${e.note ? `<p class="card-text">${escapeHtml(e.note)}</p>` : ""}
+                ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
+      }
       break;
     case "funnything":
       if (e.lines && e.lines.length) {
@@ -1694,6 +1702,7 @@ function openAddSheet() {
   thenNowFocal = { then: { x: 50, y: 50 }, now: { x: 50, y: 50 } };
   firstYearPending = {};
   firstYearExisting = {};
+  milestoneSubtype = null;
   renderTypePicker();
   document.getElementById("addSheetOverlay").classList.add("open");
   lockBodyScroll();
@@ -1719,6 +1728,7 @@ function openEditSheet(entryId) {
   firstYearPending = {};
   firstYearExisting = {};
   (entry.months || []).forEach(m => { firstYearExisting[m.monthIndex] = m.photo; });
+  milestoneSubtype = (entry.category === "milestone" && entry.subtype === "firstword") ? "firstword" : null;
   renderEntryForm(entry);
   document.getElementById("addSheetOverlay").classList.add("open");
   lockBodyScroll();
@@ -1911,16 +1921,7 @@ function renderEntryForm(existing) {
         ${photoPickerHtml(existing)}`;
       break;
     case "milestone":
-      typeFields = `
-        <div class="field">
-          <label>Milestone</label>
-          <div class="milestone-suggest">
-            ${MILESTONE_SUGGESTIONS.map(m => `<div class="chip" data-milestone="${escapeHtml(m)}">${m}</div>`).join("")}
-          </div>
-          <input type="text" id="fTitle" placeholder="Or type your own..." value="${existing ? escapeHtml(existing.title || "") : ""}">
-        </div>
-        <div class="field"><label>Note (optional)</label><textarea id="fNote" placeholder="Any details worth remembering...">${existing ? existing.note || "" : ""}</textarea></div>
-        ${photoPickerHtml(existing)}`;
+      typeFields = `<div id="milestoneFields"></div>`;
       break;
     case "stat":
       typeFields = `
@@ -2055,7 +2056,7 @@ function renderEntryForm(existing) {
   }
 
   content.innerHTML = `
-    <div class="sheet-title">${cat.emoji} ${existing ? "Edit" : "New"} ${cat.label}</div>
+    <div class="sheet-title" id="entrySheetTitle">${cat.emoji} ${existing ? "Edit" : "New"} ${cat.label}</div>
     ${dateField}
     ${typeFields}
     ${kidChips}
@@ -2103,13 +2104,6 @@ function renderEntryForm(existing) {
   bindTripChipEvents();
   document.getElementById("createTripBtn").addEventListener("click", createNewTripInline);
 
-  // Milestone suggestion chips
-  content.querySelectorAll("[data-milestone]").forEach(chip => {
-    chip.addEventListener("click", () => {
-      document.getElementById("fTitle").value = chip.dataset.milestone;
-    });
-  });
-
   // Quote dialogue editor (Funny Thing)
   if (selectedType === "funnything") {
     initQuoteLinesEditor(existing);
@@ -2135,6 +2129,12 @@ function renderEntryForm(existing) {
     initSonogramDropzone();
   }
 
+  // Milestone: normally suggestion chips + freeform title, but "First word"
+  // switches into its own dedicated word + story layout (see renderMilestoneFields).
+  if (selectedType === "milestone") {
+    renderMilestoneFields(existing);
+  }
+
   // Birthday: attendees/gifts chip inputs
   if (selectedType === "birthday") {
     initChipInput("attendeesPills", "attendeesInput", existing ? existing.attendees : []);
@@ -2150,9 +2150,11 @@ function renderEntryForm(existing) {
     });
   }
 
-  // Photo input handling
+  // Photo input handling — milestone handles its own inside
+  // renderMilestoneFields, since switching in/out of First Word mode
+  // replaces the picker and needs a fresh binding each time.
   const photoInput = document.getElementById("fPhotos");
-  if (photoInput) {
+  if (photoInput && selectedType !== "milestone") {
     renderPhotoPreview();
     photoInput.addEventListener("change", (e) => {
       pendingPhotos = pendingPhotos.concat(Array.from(e.target.files));
@@ -2230,6 +2232,83 @@ function renderPregnancyFields(subtype, existing) {
         e.target.value = "";
       });
     }
+  }
+}
+
+// Milestone normally shows suggestion chips + a freeform title/note, but
+// tapping "First word" swaps in a dedicated layout built around the actual
+// word and the story behind it — matching its own dedicated card display
+// (see renderCard's "milestone" case). Re-render is triggered by tapping
+// a milestone chip, or the "back" link inside the First Word layout.
+// Milestone's sheet title normally just reflects the category ("⭐ New
+// Milestone"), but First Word is dedicated enough to deserve its own header
+// too — flips it to "🗣️ New/Edit First Word" and back as the subtype toggles.
+function updateEntrySheetTitle(existing) {
+  const titleEl = document.getElementById("entrySheetTitle");
+  if (!titleEl) return;
+  if (selectedType === "milestone" && milestoneSubtype === "firstword") {
+    const isEditingFirstWord = existing && existing.category === "milestone" && existing.subtype === "firstword";
+    titleEl.textContent = `🗣️ ${isEditingFirstWord ? "Edit" : "New"} First Word`;
+  } else {
+    const cat = CATEGORIES[selectedType];
+    if (cat) titleEl.textContent = `${cat.emoji} ${existing ? "Edit" : "New"} ${cat.label}`;
+  }
+}
+
+function renderMilestoneFields(existing) {
+  const container = document.getElementById("milestoneFields");
+  if (!container) return;
+  updateEntrySheetTitle(existing);
+
+  const existingIsFirstWord = existing && existing.category === "milestone" && existing.subtype === "firstword";
+
+  if (milestoneSubtype === "firstword") {
+    const word = existingIsFirstWord ? (existing.title || "") : "";
+    const story = existingIsFirstWord ? (existing.note || "") : "";
+    container.innerHTML = `
+      <button type="button" class="collapse-toggle" id="backToGeneralMilestone">← Not a first word? Pick another milestone</button>
+      <div class="field"><label>What did they say?</label><input type="text" id="fFirstWord" placeholder="e.g. Dada" value="${escapeHtml(word)}"></div>
+      <div class="field"><label>The story (optional)</label><textarea id="fNote" placeholder="How it happened, who was there...">${escapeHtml(story)}</textarea></div>
+      ${photoPickerHtml()}
+    `;
+    document.getElementById("backToGeneralMilestone").addEventListener("click", () => {
+      milestoneSubtype = null;
+      renderMilestoneFields(existing);
+    });
+  } else {
+    const title = (existing && !existingIsFirstWord) ? (existing.title || "") : "";
+    const note = (existing && !existingIsFirstWord) ? (existing.note || "") : "";
+    container.innerHTML = `
+      <div class="field">
+        <label>Milestone</label>
+        <div class="milestone-suggest">
+          ${MILESTONE_SUGGESTIONS.map(m => `<div class="chip" data-milestone="${escapeHtml(m)}">${m}</div>`).join("")}
+        </div>
+        <input type="text" id="fTitle" placeholder="Or type your own..." value="${escapeHtml(title)}">
+      </div>
+      <div class="field"><label>Note (optional)</label><textarea id="fNote" placeholder="Any details worth remembering...">${escapeHtml(note)}</textarea></div>
+      ${photoPickerHtml()}
+    `;
+    container.querySelectorAll("[data-milestone]").forEach(chip => {
+      chip.addEventListener("click", () => {
+        if (chip.dataset.milestone === "First word") {
+          milestoneSubtype = "firstword";
+          renderMilestoneFields(existing);
+        } else {
+          document.getElementById("fTitle").value = chip.dataset.milestone;
+        }
+      });
+    });
+  }
+
+  const photoInput = document.getElementById("fPhotos");
+  if (photoInput) {
+    renderPhotoPreview();
+    photoInput.addEventListener("change", (e) => {
+      pendingPhotos = pendingPhotos.concat(Array.from(e.target.files));
+      renderPhotoPreview();
+      e.target.value = "";
+    });
   }
 }
 
@@ -3100,6 +3179,10 @@ async function saveEntry() {
     showToast("Drop in the sonogram photo first");
     return;
   }
+  if (selectedType === "milestone" && milestoneSubtype === "firstword" && !getVal("fFirstWord").trim()) {
+    showToast("Enter the word first");
+    return;
+  }
 
   const btn = document.getElementById("saveEntryBtn");
   btn.disabled = true;
@@ -3135,7 +3218,8 @@ async function saveEntry() {
         data.context = getVal("fContext");
         break;
       case "milestone":
-        data.title = getVal("fTitle");
+        data.subtype = milestoneSubtype === "firstword" ? "firstword" : null;
+        data.title = milestoneSubtype === "firstword" ? getVal("fFirstWord") : getVal("fTitle");
         data.note = getVal("fNote");
         break;
       case "stat":
