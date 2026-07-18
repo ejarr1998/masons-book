@@ -226,12 +226,21 @@ input, textarea, select{ font-family: inherit; }
 .card-age{ display:inline-block; margin-top:10px; font-size:11px; font-weight:600; color: var(--ink-soft); }
 .card-age::before{ content:""; display:inline-block; width:4px;height:4px; border-radius:50%; background: var(--rust-soft); margin-right:7px; vertical-align:middle; }
 
-.card.milestone, .card.birthday, .card.pregnancy, .card.birth{ background: var(--forest); color: var(--parchment); }
-.card.milestone .card-date, .card.birthday .card-date, .card.pregnancy .card-date, .card.birth .card-date{ color: rgba(246,241,231,0.65); }
-.card.milestone .card-tag, .card.birthday .card-tag, .card.pregnancy .card-tag, .card.birth .card-tag{ background: rgba(246,241,231,0.15); color: var(--parchment); }
-.card.milestone .card-title, .card.birthday .card-title, .card.pregnancy .card-title, .card.birth .card-title{ color: var(--parchment); font-size:18px; }
-.card.milestone .card-text, .card.birthday .card-text, .card.pregnancy .card-text, .card.birth .card-text{ color: rgba(246,241,231,0.85); }
-.card.milestone .card-kids, .card.birthday .card-kids, .card.pregnancy .card-kids, .card.birth .card-kids{ color: rgba(246,241,231,0.6); }
+.card.milestone, .card.birthday, .card.pregnancy, .card.birth, .card.schoolday{ background: var(--forest); color: var(--parchment); }
+.card.milestone .card-date, .card.birthday .card-date, .card.pregnancy .card-date, .card.birth .card-date, .card.schoolday .card-date{ color: rgba(246,241,231,0.65); }
+.card.milestone .card-tag, .card.birthday .card-tag, .card.pregnancy .card-tag, .card.birth .card-tag, .card.schoolday .card-tag{ background: rgba(246,241,231,0.15); color: var(--parchment); }
+.card.milestone .card-title, .card.birthday .card-title, .card.pregnancy .card-title, .card.birth .card-title, .card.schoolday .card-title{ color: var(--parchment); font-size:18px; }
+.card.milestone .card-text, .card.birthday .card-text, .card.pregnancy .card-text, .card.birth .card-text, .card.schoolday .card-text{ color: rgba(246,241,231,0.85); }
+.card.milestone .card-kids, .card.birthday .card-kids, .card.pregnancy .card-kids, .card.birth .card-kids, .card.schoolday .card-kids{ color: rgba(246,241,231,0.6); }
+
+/* First Day of School — grade badge up top (its own accent color so it reads
+   as a milestone marker rather than just another tag), school name as a
+   small locator line underneath the title. */
+.schoolday-badge{
+  display:inline-block; font-size:12px; font-weight:800; padding:4px 12px;
+  border-radius:100px; background: var(--rust); color:#fff; margin-bottom:8px;
+}
+.schoolday-school{ font-size:13px; color: rgba(246,241,231,0.75); margin-top:2px; margin-bottom:4px; }
 
 /* First Word — a dedicated milestone subtype: a small label, then the word
    itself set big and handwritten (matching the app's Caveat treatment for
@@ -389,11 +398,11 @@ input, textarea, select{ font-family: inherit; }
   background: var(--rust); color: var(--white);
 }
 .card.milestone .entry-tag-pill, .card.birthday .entry-tag-pill, .card.pregnancy .entry-tag-pill,
-.card.birth .entry-tag-pill, .card.funnything .entry-tag-pill{
+.card.birth .entry-tag-pill, .card.funnything .entry-tag-pill, .card.schoolday .entry-tag-pill{
   background: rgba(246,241,231,0.18); color: rgba(246,241,231,0.85);
 }
 .card.milestone .entry-tag-pill:hover, .card.birthday .entry-tag-pill:hover, .card.pregnancy .entry-tag-pill:hover,
-.card.birth .entry-tag-pill:hover, .card.funnything .entry-tag-pill:hover{
+.card.birth .entry-tag-pill:hover, .card.funnything .entry-tag-pill:hover, .card.schoolday .entry-tag-pill:hover{
   background: var(--rust); color: var(--white);
 }
 

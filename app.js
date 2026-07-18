@@ -49,8 +49,17 @@ const CATEGORIES = {
   birth:      { label: "Birth Day",    emoji: "👶", tagLabel: "Birth Day" },
   thennow:    { label: "Then vs. Now", emoji: "↔️", tagLabel: "Then vs. Now" },
   firstyear:  { label: "First Year",   emoji: "🎞️", tagLabel: "First Year" },
-  sonogram:   { label: "Sonogram",     emoji: "🩻", tagLabel: "Sonogram" }
+  sonogram:   { label: "Sonogram",     emoji: "🩻", tagLabel: "Sonogram" },
+  schoolday:  { label: "First Day of School", emoji: "🎒", tagLabel: "First Day of School" }
 };
+
+// Preschool through senior year — covers the whole run of "first day" photos.
+const SCHOOL_GRADE_LEVELS = [
+  "Preschool", "Pre-K", "Kindergarten",
+  "1st Grade", "2nd Grade", "3rd Grade", "4th Grade", "5th Grade",
+  "6th Grade", "7th Grade", "8th Grade",
+  "9th Grade", "10th Grade", "11th Grade", "12th Grade"
+];
 
 const MILESTONE_SUGGESTIONS = [
   "First smile", "First laugh", "Rolled over", "Sat up", "First tooth",
@@ -1010,6 +1019,13 @@ export function renderCard(e) {
               </div>`;
       break;
     }
+    case "schoolday":
+      body = `${e.gradeLevel ? `<span class="schoolday-badge">🎒 ${escapeHtml(e.gradeLevel)}</span>` : ""}
+              <div class="card-title">First Day of School</div>
+              ${e.schoolName ? `<div class="schoolday-school">📍 ${escapeHtml(e.schoolName)}</div>` : ""}
+              ${e.note ? `<p class="card-text">${escapeHtml(e.note)}</p>` : ""}
+              ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
+      break;
     default: // photo
       body = `${e.caption ? `<p class="photo-caption">${escapeHtml(e.caption)}</p>` : ""}
               ${ageTxt ? `<span class="card-age">${ageTxt}</span>` : ""}`;
@@ -2045,6 +2061,18 @@ function renderEntryForm(existing) {
           }).join("")}
         </div>`;
       break;
+    case "schoolday":
+      typeFields = `
+        <div class="field">
+          <label>Grade</label>
+          <div class="chip-select" id="gradeLevelChips">
+            ${SCHOOL_GRADE_LEVELS.map(g => `<div class="chip ${(existing?.gradeLevel || "") === g ? "selected" : ""}" data-grade="${escapeHtml(g)}">${g}</div>`).join("")}
+          </div>
+        </div>
+        <div class="field"><label>School name (optional)</label><input type="text" id="fSchoolName" placeholder="e.g. Noblesville Elementary" value="${existing ? escapeHtml(existing.schoolName || "") : ""}"></div>
+        ${photoPickerHtml(existing)}
+        <div class="field"><label>Note (optional)</label><textarea id="fNote" placeholder="How they felt, what they wore, first-day jitters...">${existing ? escapeHtml(existing.note || "") : ""}</textarea></div>`;
+      break;
     case "sonogram":
       // The sonogram photo is the whole point of this entry, so instead of the
       // generic file input the form leads with a drop zone: drag the image
@@ -2104,6 +2132,16 @@ function renderEntryForm(existing) {
   content.querySelectorAll("#kidChips .chip").forEach(chip => {
     chip.addEventListener("click", () => chip.classList.toggle("selected"));
   });
+
+  // Grade level: single-select, same pattern as pregnancy's type chips.
+  if (selectedType === "schoolday") {
+    content.querySelectorAll("#gradeLevelChips .chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        content.querySelectorAll("#gradeLevelChips .chip").forEach(c => c.classList.remove("selected"));
+        chip.classList.add("selected");
+      });
+    });
+  }
 
   // Birthday #: auto-suggest from the kid's stored birthdate + this entry's
   // date, so it's not manual guesswork — but never overwrite a value that's
@@ -3217,6 +3255,10 @@ async function saveEntry() {
     showToast("Enter the word first");
     return;
   }
+  if (selectedType === "schoolday" && !document.querySelector("#gradeLevelChips .chip.selected")) {
+    showToast("Pick a grade first");
+    return;
+  }
 
   const btn = document.getElementById("saveEntryBtn");
   btn.disabled = true;
@@ -3293,6 +3335,12 @@ async function saveEntry() {
         data.title = getVal("fTitle");
         data.weeks = getVal("fWeeks");
         data.caption = getVal("fCaption");
+        break;
+      case "schoolday":
+        // photos are picked up by the generic fPhotos block below
+        data.gradeLevel = document.querySelector("#gradeLevelChips .chip.selected")?.dataset.grade || "";
+        data.schoolName = getVal("fSchoolName");
+        data.note = getVal("fNote");
         break;
       case "thennow": {
         data.title = getVal("fTitle");
