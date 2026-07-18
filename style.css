@@ -143,6 +143,12 @@ input, textarea, select{ font-family: inherit; }
   font-size: 14px;
   line-height: 1.6;
 }
+.load-more-btn{
+  align-self:center; margin: 4px 0 24px; padding: 12px 28px; border-radius:100px;
+  border:2px solid var(--taupe); background: var(--parchment-2); color: var(--forest);
+  font-weight:700; font-size:14px; cursor:pointer;
+}
+.load-more-btn:active{ background: var(--taupe); }
 
 /* Cards */
 .card{

@@ -92,6 +92,17 @@ let activeMonthFilter = "all";
 let TAGS = []; // user-created tags, shared via Firestore, e.g. "Doctor Visit", "Grandma's House"
 let activeTagFilters = []; // multi-select: entry matches if it has ANY of these tags
 let expandedFilterSections = { people: false, type: false, dates: false };
+
+// Feed pagination: state.entries and getFilteredEntries() always hold the
+// COMPLETE dataset — Backup & Export, the delete-a-child cascade, On This
+// Day, birthday scrubbers, and the year/month filter options all depend on
+// that completeness, so the Firestore query itself stays unpaginated. What's
+// paginated is purely how many cards renderFeed() actually builds and
+// inserts into the DOM at once, which is the part that was genuinely slow
+// to render as entries pile up over the years.
+const FEED_PAGE_SIZE = 20;
+let feedRenderedCount = FEED_PAGE_SIZE;
+let lastFeedFilterKey = "";
 let selectedType = null;
 let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
@@ -663,6 +674,15 @@ export function renderFeed() {
   const feedEl = document.getElementById("feed");
   let filtered = getFilteredEntries();
 
+  // A genuine filter change (not just a live update from onSnapshot) should
+  // start back at page one — otherwise switching from "All" to a single kid
+  // could land you already scrolled three pages deep into a much shorter list.
+  const filterKey = `${activeKidFilter}|${activeCategoryFilter}|${activeYearFilter}|${activeMonthFilter}|${activeTagFilters.slice().sort().join(",")}`;
+  if (filterKey !== lastFeedFilterKey) {
+    feedRenderedCount = FEED_PAGE_SIZE;
+    lastFeedFilterKey = filterKey;
+  }
+
   // On This Day only makes sense on the completely unfiltered view — any
   // active filter (kid, category, year/month, or tags) means the person is
   // deliberately looking at a narrowed slice, and resurfacing an unrelated
@@ -694,14 +714,17 @@ export function renderFeed() {
     return;
   }
 
-  // Entries that belong to a trip don't render individually — they collapse
-  // into one Trip card (at the position of the trip's most recent matching
-  // entry, since `filtered` is already sorted newest-first). Birthday entries
-  // get the same treatment, grouped per kid into one scrubbable timeline.
+  // Only build cards for entries within the current page window — trip and
+  // birthday cards still pull their full entry list straight from
+  // state.entries regardless of this slice, so grouping stays accurate even
+  // when a trip's other photos live outside the window.
+  const windowed = filtered.slice(0, feedRenderedCount);
+  const hasMore = filtered.length > feedRenderedCount;
+
   const seenTrips = new Set();
   const seenBirthdayKids = new Set();
   const cardsHtml = [];
-  for (const e of filtered) {
+  for (const e of windowed) {
     if (e.tripId) {
       if (seenTrips.has(e.tripId)) continue;
       seenTrips.add(e.tripId);
@@ -716,8 +739,19 @@ export function renderFeed() {
     }
   }
 
-  feedEl.innerHTML = onThisDayHtml + cardsHtml.join("");
+  const loadMoreHtml = hasMore
+    ? `<button type="button" class="load-more-btn" id="loadMoreBtn">Load more memories</button>`
+    : "";
+
+  feedEl.innerHTML = onThisDayHtml + cardsHtml.join("") + loadMoreHtml;
   bindCardEvents(feedEl);
+
+  if (hasMore) {
+    document.getElementById("loadMoreBtn").addEventListener("click", () => {
+      feedRenderedCount += FEED_PAGE_SIZE;
+      renderFeed();
+    });
+  }
 }
 
 function renderBirthdayScrubberCard(kidId) {
