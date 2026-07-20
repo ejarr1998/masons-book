@@ -4040,6 +4040,26 @@ function computeTagNameMentionUpdates(oldName, newName) {
     .filter(t => t.newName !== t.oldName);
 }
 
+// Trips live in their own Firestore collection (not `entries`), so a name
+// in a trip's title or location — e.g. "Mason's Beach Trip" — would
+// otherwise be missed entirely by computeNameMentionUpdates.
+function computeTripNameMentionUpdates(oldName, newName) {
+  const updates = [];
+  for (const t of state.TRIPS) {
+    const changes = {};
+    if (typeof t.title === "string" && t.title) {
+      const replaced = replaceNameMentions(t.title, oldName, newName);
+      if (replaced !== t.title) changes.title = replaced;
+    }
+    if (typeof t.location === "string" && t.location) {
+      const replaced = replaceNameMentions(t.location, oldName, newName);
+      if (replaced !== t.location) changes.location = replaced;
+    }
+    if (Object.keys(changes).length > 0) updates.push({ id: t.id, changes });
+  }
+  return updates;
+}
+
 function renderEditKidNameStep1(kidId) {
   const kid = KIDS.find(k => k.id === kidId);
   if (!kid) return;
@@ -4097,6 +4117,7 @@ function renderEditKidNameStep3(kidId, oldName, newName) {
   const content = document.getElementById("addSheetContent");
   const entryUpdates = computeNameMentionUpdates(oldName, newName);
   const tagUpdates = computeTagNameMentionUpdates(oldName, newName);
+  const tripUpdates = computeTripNameMentionUpdates(oldName, newName);
   content.innerHTML = `
     <div class="sheet-title">Here's what will change</div>
     <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:10px;">
@@ -4104,6 +4125,11 @@ function renderEditKidNameStep3(kidId, oldName, newName) {
       "${escapeHtml(oldName)}" by name in a title, caption, note, or quote — each will be rewritten to
       say "${escapeHtml(newName)}" instead.
     </p>
+    ${tripUpdates.length > 0 ? `
+      <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:10px;">
+        <strong>${tripUpdates.length}</strong> trip ${tripUpdates.length === 1 ? "title/location mentions" : "titles/locations mention"}
+        it too (e.g. "${escapeHtml(oldName)}'s Beach Trip").
+      </p>` : ""}
     ${tagUpdates.length > 0 ? `
       <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">
         <strong>${tagUpdates.length}</strong> ${tagUpdates.length === 1 ? "tag" : "tags"} will be renamed too
@@ -4127,6 +4153,9 @@ function renderEditKidNameStep3(kidId, oldName, newName) {
       }
       for (const t of tagUpdates) {
         await updateDoc(doc(db, "tags", t.id), { name: t.newName });
+      }
+      for (const t of tripUpdates) {
+        await updateDoc(doc(db, "trips", t.id), t.changes);
       }
       showToast(`Renamed to ${newName} — updated ${entryUpdates.length} ${entryUpdates.length === 1 ? "entry" : "entries"}`);
       renderManageKids(false);
