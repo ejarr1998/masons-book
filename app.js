@@ -112,6 +112,7 @@ let expandedFilterSections = { people: false, type: false, dates: false };
 const FEED_PAGE_SIZE = 20;
 let feedRenderedCount = FEED_PAGE_SIZE;
 let lastFeedFilterKey = "";
+let pinnedSectionCollapsed = false; // session-only — resets to expanded on reload
 let selectedType = null;
 let pendingPhotos = []; // File objects staged for upload in the add sheet
 let editingEntryId = null; // if set, add sheet is in "edit existing" mode
@@ -722,32 +723,62 @@ export function renderFeed() {
     return;
   }
 
-  // Pinned entries always show in full, regardless of the pagination window —
-  // that's the whole point of pinning something. Only the remaining unpinned
-  // entries are subject to feedRenderedCount / "Load more".
+  // Pinned entries always show in full (or as a compact strip, if
+  // collapsed), regardless of the pagination window — that's the whole
+  // point of pinning something. Only the remaining unpinned entries are
+  // subject to feedRenderedCount / "Load more".
   const pinned = filtered.filter(e => e.isPinned);
   const unpinned = filtered.filter(e => !e.isPinned);
   const windowedUnpinned = unpinned.slice(0, feedRenderedCount);
   const hasMore = unpinned.length > feedRenderedCount;
-  const windowed = [...pinned, ...windowedUnpinned];
 
   const seenTrips = new Set();
   const seenBirthdayKids = new Set();
-  const cardsHtml = [];
-  for (const e of windowed) {
+  const buildCardHtml = (e) => {
     if (e.tripId) {
-      if (seenTrips.has(e.tripId)) continue;
+      if (seenTrips.has(e.tripId)) return "";
       seenTrips.add(e.tripId);
-      cardsHtml.push(renderTripCard(e.tripId));
+      return renderTripCard(e.tripId);
     } else if (e.category === "birthday" && e.kids && e.kids.length) {
       const kidId = e.kids[0];
-      if (seenBirthdayKids.has(kidId)) continue;
+      if (seenBirthdayKids.has(kidId)) return "";
       seenBirthdayKids.add(kidId);
-      cardsHtml.push(renderBirthdayScrubberCard(kidId));
+      return renderBirthdayScrubberCard(kidId);
     } else {
-      cardsHtml.push(renderCard(e));
+      return renderCard(e);
+    }
+  };
+
+  // A handful of pins is a nice shortcut to the family's favorites — a dozen
+  // of them permanently taking over the top of the feed defeats the purpose.
+  // Collapsing swaps the full cards for a compact scrollable thumbnail row;
+  // tapping any thumbnail (or the toggle) expands back to full cards.
+  let pinnedHtml = "";
+  if (pinned.length > 0) {
+    const headerHtml = `
+      <div class="pinned-section-header">
+        <span class="pinned-section-title">📌 ${pinned.length} Pinned</span>
+        <button type="button" class="pinned-collapse-btn" id="pinnedCollapseBtn">${pinnedSectionCollapsed ? "▾ Show" : "▴ Collapse"}</button>
+      </div>`;
+    if (pinnedSectionCollapsed) {
+      const stripHtml = `<div class="pinned-strip">${pinned.map(e => {
+        const cat = CATEGORIES[e.category] || CATEGORIES.photo;
+        const thumbUrl = (e.photos && e.photos[0] && e.photos[0].url) ||
+          (e.thenPhoto && e.thenPhoto.url) ||
+          (e.weeks && e.weeks[0] && e.weeks[0].photo && e.weeks[0].photo.url) ||
+          (e.months && e.months.find(m => m.photo)?.photo.url) || null;
+        return `
+        <div class="pinned-strip-thumb" data-pinned-strip-item="${e.id}" title="${escapeHtml(cat.label)}">
+          ${thumbUrl ? `<img src="${thumbUrl}" alt="">` : `<span class="pinned-strip-emoji">${cat.emoji}</span>`}
+        </div>`;
+      }).join("")}</div>`;
+      pinnedHtml = headerHtml + stripHtml;
+    } else {
+      pinnedHtml = headerHtml + pinned.map(buildCardHtml).join("");
     }
   }
+
+  const cardsHtml = [pinnedHtml, ...windowedUnpinned.map(buildCardHtml)];
 
   const loadMoreHtml = hasMore
     ? `<button type="button" class="load-more-btn" id="loadMoreBtn">Load more memories</button>`
@@ -755,6 +786,21 @@ export function renderFeed() {
 
   feedEl.innerHTML = onThisDayHtml + cardsHtml.join("") + loadMoreHtml;
   bindCardEvents(feedEl);
+
+  if (pinned.length > 0) {
+    document.getElementById("pinnedCollapseBtn").addEventListener("click", () => {
+      pinnedSectionCollapsed = !pinnedSectionCollapsed;
+      renderFeed();
+    });
+    if (pinnedSectionCollapsed) {
+      feedEl.querySelectorAll("[data-pinned-strip-item]").forEach(el => {
+        el.addEventListener("click", () => {
+          pinnedSectionCollapsed = false;
+          renderFeed();
+        });
+      });
+    }
+  }
 
   if (hasMore) {
     document.getElementById("loadMoreBtn").addEventListener("click", () => {
