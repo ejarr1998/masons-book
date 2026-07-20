@@ -3601,7 +3601,10 @@ function renderManageKids(showAddForm) {
             <div style="font-weight:700; font-size:14px;">${escapeHtml(k.name)}</div>
             <div style="font-size:12px; color:var(--ink-soft);">${k.birthdate ? formatDate(k.birthdate) : "No birthdate set"}</div>
           </div>
-          <button type="button" class="icon-btn danger" data-delete-kid="${k.id}" aria-label="Delete ${escapeHtml(k.name)}" title="Delete child">${icon("trash")}</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="icon-btn" data-editname-kid="${k.id}" aria-label="Edit ${escapeHtml(k.name)}'s name" title="Edit name">${icon("pencil")}</button>
+            <button type="button" class="icon-btn danger" data-delete-kid="${k.id}" aria-label="Delete ${escapeHtml(k.name)}" title="Delete child">${icon("trash")}</button>
+          </div>
         </div>`).join("")}
     </div>
     ${showAddForm ? `
@@ -3614,6 +3617,10 @@ function renderManageKids(showAddForm) {
       <button class="btn-secondary" id="closeManageKidsBtn">Close</button>
     `}
   `;
+
+  content.querySelectorAll("[data-editname-kid]").forEach(btn => {
+    btn.addEventListener("click", () => renderEditKidNameStep1(btn.dataset.editnameKid));
+  });
 
   content.querySelectorAll("[data-delete-kid]").forEach(btn => {
     btn.addEventListener("click", () => renderDeleteKidStep1(btn.dataset.deleteKid));
@@ -3784,6 +3791,191 @@ async function deleteKidCascade(kidId) {
     updateHeaderSub();
     updateFiltersButtonBadge();
   }
+}
+
+// ============================================================
+// EDIT A CHILD'S NAME — handles the "we thought it was Mason, it's actually
+// Levi" case. Renaming kids/{id}.name alone already fixes every place the
+// app displays a name by looking it up live (kidsLabel, filters, card-kids,
+// etc.) — but titles, captions, notes, and quotes typed out by hand still
+// say the old name verbatim. This offers the retroactive find-and-replace
+// as an explicit opt-in second step, since it's a real bulk edit.
+// ============================================================
+
+// Only these fields, per category, are eligible for text replacement — never
+// a blind walk of the whole entry object, since that could touch ids, photo
+// paths, or other things that aren't actually the child's name as prose.
+const NAME_REPLACEABLE_FIELDS = {
+  birth: ["babyName", "caption"],
+  milestone: ["title", "note"], // handled specially below for subtype "firstword"
+  funnything: ["context", "quote"],
+  birthday: ["theme", "location", "note"],
+  letter: ["text", "from"],
+  pregnancy: ["title", "caption"],
+  sonogram: ["title", "caption"],
+  thennow: ["title", "caption", "thenLabel", "nowLabel"],
+  firstyear: ["title"],
+  photo: ["caption"],
+  schoolday: ["note"]
+};
+
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Whole-word match only — "Mason" must never touch "Masonry", and a fresh
+// RegExp is built every call so there's no shared lastIndex state to trip on.
+function replaceNameMentions(str, oldName, newName) {
+  if (typeof str !== "string" || !str) return str;
+  const regex = new RegExp(`\\b${escapeRegExp(oldName)}\\b`, "g");
+  return str.replace(regex, newName);
+}
+
+// Dry-run: figures out exactly which entries would change and how, without
+// writing anything — so the person can see a real count before committing.
+function computeNameMentionUpdates(oldName, newName) {
+  const updates = [];
+  for (const e of state.entries) {
+    const changes = {};
+    const isFirstWord = e.category === "milestone" && e.subtype === "firstword";
+    // "title" on a First Word entry is the word the child said, not their
+    // name — even if it happened to match, replacing it would be wrong.
+    const fields = isFirstWord ? ["note"] : (NAME_REPLACEABLE_FIELDS[e.category] || NAME_REPLACEABLE_FIELDS.photo);
+    fields.forEach(f => {
+      const original = e[f];
+      if (typeof original === "string" && original) {
+        const replaced = replaceNameMentions(original, oldName, newName);
+        if (replaced !== original) changes[f] = replaced;
+      }
+    });
+    if (e.category === "funnything" && Array.isArray(e.lines) && e.lines.length) {
+      let linesChanged = false;
+      const newLines = e.lines.map(l => {
+        const speaker = replaceNameMentions(l.speaker, oldName, newName);
+        const text = replaceNameMentions(l.text, oldName, newName);
+        if (speaker !== l.speaker || text !== l.text) linesChanged = true;
+        return { speaker, text };
+      });
+      if (linesChanged) changes.lines = newLines;
+    }
+    if (e.category === "birthday") {
+      if (Array.isArray(e.attendees)) {
+        const newAttendees = e.attendees.map(a => replaceNameMentions(a, oldName, newName));
+        if (newAttendees.some((a, i) => a !== e.attendees[i])) changes.attendees = newAttendees;
+      }
+      if (Array.isArray(e.gifts)) {
+        const newGifts = e.gifts.map(g => replaceNameMentions(g, oldName, newName));
+        if (newGifts.some((g, i) => g !== e.gifts[i])) changes.gifts = newGifts;
+      }
+    }
+    if (Object.keys(changes).length > 0) updates.push({ id: e.id, changes });
+  }
+  return updates;
+}
+
+function computeTagNameMentionUpdates(oldName, newName) {
+  return TAGS
+    .map(t => ({ id: t.id, newName: replaceNameMentions(t.name, oldName, newName), oldName: t.name }))
+    .filter(t => t.newName !== t.oldName);
+}
+
+function renderEditKidNameStep1(kidId) {
+  const kid = KIDS.find(k => k.id === kidId);
+  if (!kid) return;
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">Edit ${escapeHtml(kid.name)}'s name</div>
+    <div class="field"><label>New name</label><input type="text" id="fNewKidName" value="${escapeHtml(kid.name)}"></div>
+    <button class="btn-primary" id="editNameContinueBtn">Continue</button>
+    <button class="btn-secondary" id="editNameCancelBtn">Cancel</button>
+  `;
+  document.getElementById("editNameCancelBtn").addEventListener("click", () => renderManageKids(false));
+  document.getElementById("editNameContinueBtn").addEventListener("click", () => {
+    const newName = getVal("fNewKidName").trim();
+    if (!newName) { showToast("Enter a name first"); return; }
+    if (newName === kid.name) { showToast("That's already the name"); return; }
+    renderEditKidNameStep2(kidId, kid.name, newName);
+  });
+}
+
+function renderEditKidNameStep2(kidId, oldName, newName) {
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">${escapeHtml(oldName)} → ${escapeHtml(newName)}</div>
+    <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">
+      Renaming updates every filter, label, and lookup in the app automatically — that part's instant
+      either way. The question is what to do with entries that already spelled out
+      "${escapeHtml(oldName)}" in a title, caption, or note.
+    </p>
+    <button class="btn-primary" id="justRenameBtn">Just update the name going forward</button>
+    <button class="btn-secondary" id="renameAndReplaceBtn">Also replace "${escapeHtml(oldName)}" with "${escapeHtml(newName)}" in existing entries</button>
+    <button class="btn-secondary" id="editNameBackBtn" style="margin-top:14px;">Go back</button>
+  `;
+  document.getElementById("editNameBackBtn").addEventListener("click", () => renderEditKidNameStep1(kidId));
+  document.getElementById("justRenameBtn").addEventListener("click", async () => {
+    const btn = document.getElementById("justRenameBtn");
+    btn.disabled = true;
+    btn.textContent = "Updating...";
+    try {
+      await updateDoc(doc(db, "kids", kidId), { name: newName });
+      showToast(`Updated to ${newName}`);
+      renderManageKids(false);
+    } catch (err) {
+      console.error("Rename kid error:", err);
+      showToast("Couldn't update — try again");
+      btn.disabled = false;
+      btn.textContent = "Just update the name going forward";
+    }
+  });
+  document.getElementById("renameAndReplaceBtn").addEventListener("click", () => {
+    renderEditKidNameStep3(kidId, oldName, newName);
+  });
+}
+
+function renderEditKidNameStep3(kidId, oldName, newName) {
+  const content = document.getElementById("addSheetContent");
+  const entryUpdates = computeNameMentionUpdates(oldName, newName);
+  const tagUpdates = computeTagNameMentionUpdates(oldName, newName);
+  content.innerHTML = `
+    <div class="sheet-title">Here's what will change</div>
+    <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:10px;">
+      <strong>${entryUpdates.length}</strong> ${entryUpdates.length === 1 ? "entry mentions" : "entries mention"}
+      "${escapeHtml(oldName)}" by name in a title, caption, note, or quote — each will be rewritten to
+      say "${escapeHtml(newName)}" instead.
+    </p>
+    ${tagUpdates.length > 0 ? `
+      <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">
+        <strong>${tagUpdates.length}</strong> ${tagUpdates.length === 1 ? "tag" : "tags"} will be renamed too
+        (e.g. a tag literally called "${escapeHtml(oldName)}").
+      </p>` : `<p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">No tags need renaming.</p>`}
+    <p style="font-size:13px; color:var(--ink-soft); margin-bottom:14px;">
+      Photos, dates, and everything else stay exactly as they are — only the text mentioned above changes.
+    </p>
+    <button class="btn-primary" id="confirmReplaceBtn">Yes, update everything</button>
+    <button class="btn-secondary" id="replaceBackBtn">Go back</button>
+  `;
+  document.getElementById("replaceBackBtn").addEventListener("click", () => renderEditKidNameStep2(kidId, oldName, newName));
+  document.getElementById("confirmReplaceBtn").addEventListener("click", async () => {
+    const btn = document.getElementById("confirmReplaceBtn");
+    btn.disabled = true;
+    btn.textContent = "Updating...";
+    try {
+      await updateDoc(doc(db, "kids", kidId), { name: newName });
+      for (const u of entryUpdates) {
+        await updateDoc(doc(db, "entries", u.id), u.changes);
+      }
+      for (const t of tagUpdates) {
+        await updateDoc(doc(db, "tags", t.id), { name: t.newName });
+      }
+      showToast(`Renamed to ${newName} — updated ${entryUpdates.length} ${entryUpdates.length === 1 ? "entry" : "entries"}`);
+      renderManageKids(false);
+    } catch (err) {
+      console.error("Rename + replace error:", err);
+      showToast("Something went wrong partway through — check entries before trying again");
+      btn.disabled = false;
+      btn.textContent = "Yes, update everything";
+    }
+  });
 }
 
 // ============================================================
