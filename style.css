@@ -957,6 +957,17 @@ input, textarea, select{ font-family: inherit; }
   padding: 4px 0; cursor:pointer; margin-bottom: 8px;
 }
 
+/* Settings hub — a simple tappable list, one row per admin screen */
+.settings-menu{ display:flex; flex-direction:column; gap:8px; margin-bottom:8px; }
+.settings-menu-item{
+  display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+  padding:14px 16px; border-radius:12px; border:1px solid var(--taupe); background:var(--white);
+  font-size:14.5px; font-weight:700; color: var(--ink); cursor:pointer;
+}
+.settings-menu-item:active{ background: var(--parchment-2); }
+.settings-menu-icon{ font-size:19px; flex-shrink:0; }
+.settings-menu-label{ flex:1; }
+
 .photo-input-preview{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; margin-bottom:16px; }
 .photo-thumb{ position:relative; width:64px; height:64px; }
 .photo-thumb img{ width:64px; height:64px; object-fit:cover; border-radius:10px; display:block; }

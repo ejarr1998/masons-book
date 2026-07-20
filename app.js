@@ -254,8 +254,7 @@ function enterEditMode() {
   document.getElementById("modeBadge").textContent = "Edit mode";
   document.getElementById("modeBadge").classList.add("edit");
   document.getElementById("fabAddMini").style.display = "flex";
-  document.getElementById("manageKidsBtn").style.display = "flex";
-  document.getElementById("backupBtn").style.display = "flex";
+  document.getElementById("settingsBtn").style.display = "flex";
   signInAnonymously(auth)
     .then(() => {
       // Only now is request.auth actually populated server-side, so only
@@ -3631,7 +3630,7 @@ function renderManageKids(showAddForm) {
     document.getElementById("cancelAddKidBtn").addEventListener("click", () => renderManageKids(false));
   } else {
     document.getElementById("showAddKidFormBtn").addEventListener("click", () => renderManageKids(true));
-    document.getElementById("closeManageKidsBtn").addEventListener("click", closeAddSheet);
+    document.getElementById("closeManageKidsBtn").addEventListener("click", renderSettingsMenu);
   }
 }
 
@@ -3655,6 +3654,168 @@ async function saveNewKid() {
     btn.disabled = false;
     btn.textContent = "Save child";
   }
+}
+
+// ============================================================
+// SETTINGS — the single hub for admin-only actions (Manage Kids, Manage
+// Tags, Backup & Export). Replaces what used to be separate header icons
+// for each one, which doesn't scale as more admin features get added.
+// ============================================================
+
+function openSettingsSheet() {
+  renderSettingsMenu();
+  document.getElementById("addSheetOverlay").classList.add("open");
+  lockBodyScroll();
+}
+
+function renderSettingsMenu() {
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">⚙️ Settings</div>
+    <div class="settings-menu">
+      <button type="button" class="settings-menu-item" id="settingsManageKidsBtn">
+        <span class="settings-menu-icon">👶</span>
+        <span class="settings-menu-label">Manage kids</span>
+      </button>
+      <button type="button" class="settings-menu-item" id="settingsManageTagsBtn">
+        <span class="settings-menu-icon">🏷️</span>
+        <span class="settings-menu-label">Manage tags</span>
+      </button>
+      <button type="button" class="settings-menu-item" id="settingsBackupBtn">
+        <span class="settings-menu-icon">🗄️</span>
+        <span class="settings-menu-label">Backup &amp; export</span>
+      </button>
+    </div>
+    <button class="btn-secondary" id="closeSettingsBtn" style="margin-top:16px;">Close</button>
+  `;
+  document.getElementById("settingsManageKidsBtn").addEventListener("click", openManageKidsSheet);
+  document.getElementById("settingsManageTagsBtn").addEventListener("click", openManageTagsSheet);
+  document.getElementById("settingsBackupBtn").addEventListener("click", openBackupSheet);
+  document.getElementById("closeSettingsBtn").addEventListener("click", closeAddSheet);
+}
+
+// ============================================================
+// MANAGE TAGS — rename or delete a tag. Unlike renaming a kid, a tag's name
+// only ever gets displayed by looking it up live via its id (chips, entry
+// pills, filters), so renaming here is a simple, single-step field update —
+// there's no "replace mentions in old entries" step needed, because tags
+// were never embedded as free text the way a name typed into a caption is.
+// The "private" tag is a protected system tag (it's what the privacy
+// filter/Firestore rule actually keys off) and can't be renamed or deleted.
+// ============================================================
+
+function tagUsageCount(tagId) {
+  return state.entries.filter(e => (e.tags || []).includes(tagId)).length;
+}
+
+function openManageTagsSheet() {
+  renderManageTags();
+  document.getElementById("addSheetOverlay").classList.add("open");
+  lockBodyScroll();
+}
+
+function renderManageTags() {
+  const content = document.getElementById("addSheetContent");
+  const sortedTags = [...TAGS].sort((a, b) => a.name.localeCompare(b.name));
+  content.innerHTML = `
+    <div class="sheet-title">🏷️ Manage tags</div>
+    ${sortedTags.length === 0 ? `<p style="font-size:13.5px; color:var(--ink-soft); margin-bottom:16px;">No tags yet — they get created inline while adding an entry.</p>` : ""}
+    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+      ${sortedTags.map(t => {
+        const isSystemTag = t.id === "private";
+        const count = tagUsageCount(t.id);
+        return `
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; background:var(--white); border:1px solid var(--taupe); border-radius:12px;">
+          <div>
+            <div style="font-weight:700; font-size:14px;">${t.isPrivate ? "🔒 " : "#"}${escapeHtml(t.name)}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">${isSystemTag ? "System tag — powers Private entries" : `${count} ${count === 1 ? "entry" : "entries"}`}</div>
+          </div>
+          ${isSystemTag ? "" : `
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="icon-btn" data-editname-tag="${t.id}" aria-label="Rename ${escapeHtml(t.name)}" title="Rename tag">${icon("pencil")}</button>
+            <button type="button" class="icon-btn danger" data-delete-tag="${t.id}" aria-label="Delete ${escapeHtml(t.name)}" title="Delete tag">${icon("trash")}</button>
+          </div>`}
+        </div>`;
+      }).join("")}
+    </div>
+    <button class="btn-secondary" id="closeManageTagsBtn">Close</button>
+  `;
+
+  content.querySelectorAll("[data-editname-tag]").forEach(btn => {
+    btn.addEventListener("click", () => renderRenameTagForm(btn.dataset.editnameTag));
+  });
+  content.querySelectorAll("[data-delete-tag]").forEach(btn => {
+    btn.addEventListener("click", () => renderDeleteTagConfirm(btn.dataset.deleteTag));
+  });
+  document.getElementById("closeManageTagsBtn").addEventListener("click", renderSettingsMenu);
+}
+
+function renderRenameTagForm(tagId) {
+  const tag = TAGS.find(t => t.id === tagId);
+  if (!tag) return;
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">Rename "${escapeHtml(tag.name)}"</div>
+    <div class="field"><label>New name</label><input type="text" id="fNewTagName" value="${escapeHtml(tag.name)}"></div>
+    <button class="btn-primary" id="saveTagRenameBtn">Save</button>
+    <button class="btn-secondary" id="cancelTagRenameBtn">Cancel</button>
+  `;
+  document.getElementById("cancelTagRenameBtn").addEventListener("click", renderManageTags);
+  document.getElementById("saveTagRenameBtn").addEventListener("click", async () => {
+    const newName = getVal("fNewTagName").trim();
+    if (!newName) { showToast("Enter a name first"); return; }
+    const btn = document.getElementById("saveTagRenameBtn");
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+    try {
+      await updateDoc(doc(db, "tags", tagId), { name: newName });
+      showToast(`Renamed to ${newName}`);
+      renderManageTags();
+    } catch (err) {
+      console.error("Rename tag error:", err);
+      showToast("Couldn't rename — try again");
+      btn.disabled = false;
+      btn.textContent = "Save";
+    }
+  });
+}
+
+function renderDeleteTagConfirm(tagId) {
+  const tag = TAGS.find(t => t.id === tagId);
+  if (!tag) return;
+  const affectedCount = tagUsageCount(tagId);
+  const content = document.getElementById("addSheetContent");
+  content.innerHTML = `
+    <div class="sheet-title">Delete "${escapeHtml(tag.name)}"?</div>
+    <p style="font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin-bottom:18px;">
+      ${affectedCount > 0
+        ? `This tag is on <strong>${affectedCount}</strong> ${affectedCount === 1 ? "entry" : "entries"} — it'll be removed from all of them. The entries themselves aren't touched, just this tag.`
+        : "This tag isn't used on any entries right now."}
+      This can't be undone.
+    </p>
+    <button class="btn-secondary danger" id="confirmDeleteTagBtn">Delete tag</button>
+    <button class="btn-secondary" id="cancelDeleteTagBtn">Cancel</button>
+  `;
+  document.getElementById("cancelDeleteTagBtn").addEventListener("click", renderManageTags);
+  document.getElementById("confirmDeleteTagBtn").addEventListener("click", async () => {
+    const btn = document.getElementById("confirmDeleteTagBtn");
+    btn.disabled = true;
+    btn.textContent = "Deleting...";
+    try {
+      const affectedEntries = state.entries.filter(e => (e.tags || []).includes(tagId));
+      for (const e of affectedEntries) {
+        await updateDoc(doc(db, "entries", e.id), { tags: e.tags.filter(id => id !== tagId) });
+      }
+      await deleteDoc(doc(db, "tags", tagId));
+      showToast(`Deleted "${tag.name}"`);
+      renderManageTags();
+    } catch (err) {
+      console.error("Delete tag error:", err);
+      showToast("Couldn't delete — try again");
+      btn.disabled = false;
+      btn.textContent = "Delete tag";
+    }
+  });
 }
 
 // ============================================================
@@ -4141,7 +4302,7 @@ async function renderBackupSheet() {
 
   document.getElementById("fullBackupBtn").addEventListener("click", () => runBackup(true));
   document.getElementById("dataOnlyBackupBtn").addEventListener("click", () => runBackup(false));
-  document.getElementById("closeBackupBtn").addEventListener("click", closeAddSheet);
+  document.getElementById("closeBackupBtn").addEventListener("click", renderSettingsMenu);
 }
 
 async function runBackup(includePhotos) {
@@ -4270,8 +4431,7 @@ function bindGlobalEvents() {
       closeFabCluster();
     }
   });
-  document.getElementById("manageKidsBtn").addEventListener("click", openManageKidsSheet);
-  document.getElementById("backupBtn").addEventListener("click", openBackupSheet);
+  document.getElementById("settingsBtn").addEventListener("click", openSettingsSheet);
   document.getElementById("addSheetOverlay").addEventListener("click", (e) => {
     if (e.target.id === "addSheetOverlay") closeAddSheet();
   });
