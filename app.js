@@ -722,12 +722,14 @@ export function renderFeed() {
     return;
   }
 
-  // Only build cards for entries within the current page window — trip and
-  // birthday cards still pull their full entry list straight from
-  // state.entries regardless of this slice, so grouping stays accurate even
-  // when a trip's other photos live outside the window.
-  const windowed = filtered.slice(0, feedRenderedCount);
-  const hasMore = filtered.length > feedRenderedCount;
+  // Pinned entries always show in full, regardless of the pagination window —
+  // that's the whole point of pinning something. Only the remaining unpinned
+  // entries are subject to feedRenderedCount / "Load more".
+  const pinned = filtered.filter(e => e.isPinned);
+  const unpinned = filtered.filter(e => !e.isPinned);
+  const windowedUnpinned = unpinned.slice(0, feedRenderedCount);
+  const hasMore = unpinned.length > feedRenderedCount;
+  const windowed = [...pinned, ...windowedUnpinned];
 
   const seenTrips = new Set();
   const seenBirthdayKids = new Set();
@@ -848,6 +850,7 @@ export function renderCard(e) {
   const kidsTxt = kidsLabel(e.kids);
   const editControls = state.isEditMode ? `
     <div class="card-edit-controls">
+      <button class="icon-btn ${e.isPinned ? "pinned" : ""}" data-pin="${e.id}" aria-label="${e.isPinned ? "Unpin" : "Pin to top"}" title="${e.isPinned ? "Unpin" : "Pin to top"}">${icon("pin")}</button>
       <button class="icon-btn" data-edit="${e.id}" aria-label="Edit entry">${icon("pencil")}</button>
       <button class="icon-btn danger" data-delete="${e.id}" aria-label="Delete entry">${icon("trash")}</button>
     </div>` : "";
@@ -1031,9 +1034,9 @@ export function renderCard(e) {
   }
 
   return `
-    <div class="card ${e.category}" data-entry="${e.id}">
+    <div class="card ${e.category} ${e.isPinned ? "is-pinned" : ""}" data-entry="${e.id}">
       <div class="card-meta">
-        <span class="card-date">${formatDate(e.date)}</span>
+        <span class="card-date">${e.isPinned ? `<span class="pinned-badge" title="Pinned to top">${icon("pin")} Pinned</span> · ` : ""}${formatDate(e.date)}</span>
         <div style="display:flex; align-items:center; gap:8px;">
           <span class="card-tag">${(e.category === "pregnancy" && e.subtype && PREGNANCY_SUBTYPES[e.subtype]) ? PREGNANCY_SUBTYPES[e.subtype].label : cat.tagLabel}</span>
           ${editControls}
@@ -1153,6 +1156,9 @@ export function bindCardEvents(root) {
     });
     root.querySelectorAll("[data-delete]").forEach(btn => {
       btn.addEventListener("click", () => confirmDelete(btn.dataset.delete));
+    });
+    root.querySelectorAll("[data-pin]").forEach(btn => {
+      btn.addEventListener("click", () => togglePin(btn.dataset.pin));
     });
   }
 }
@@ -3494,6 +3500,18 @@ function confirmDelete(entryId) {
       })
       .catch(err => { console.error(err); showToast("Couldn't delete — try again"); });
   }
+}
+
+// Pinning is a quick toggle right from the card — no confirmation needed
+// since it's non-destructive and trivially reversible. Pinned entries jump
+// to the top of whatever filtered view they're already visible in (see
+// renderFeed), skipping the pagination window entirely so they're never
+// hidden behind a "Load more" tap.
+function togglePin(entryId) {
+  const entry = state.entries.find(e => e.id === entryId);
+  if (!entry) return;
+  updateDoc(doc(db, "entries", entryId), { isPinned: !entry.isPinned })
+    .catch(err => { console.error("Pin toggle error:", err); showToast("Couldn't update — try again"); });
 }
 
 // ============================================================
